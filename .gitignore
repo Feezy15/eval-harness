@@ -1,0 +1,35 @@
+# --- secrets / environment ---
+.env
+.env.*
+*.key
+*.pem
+secrets.*
+
+# --- private agent ---
+CLAUDE.local.md
+
+# --- results, caches, run artifacts ---
+results/
+.cache/
+llm_cache/
+wandb/
+*.log
+
+# --- python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# --- os / editor ---
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
