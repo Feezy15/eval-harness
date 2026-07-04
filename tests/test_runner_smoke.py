@@ -124,9 +124,7 @@ def test_user_sim_stop_signal_ends_episode_early():
     user_sim = UserSimulator(model=_AlwaysStopsModel(), effort="passive")
     judge = MockJudge(model="mock-judge", rubric_version="v0")
 
-    ep = run_episode(
-        task=task, agent=agent, user_sim=user_sim, judge=judge, seed=0, max_turns=5
-    )
+    ep = run_episode(task=task, agent=agent, user_sim=user_sim, judge=judge, seed=0, max_turns=5)
 
     # One agent turn, then the user is satisfied — well under the cap.
     assert sum(1 for m in ep.transcript if m.role == "assistant") == 1

@@ -24,7 +24,7 @@ class Message(BaseModel):
 class Usage(BaseModel):
     """Tokens / cost / latency for one LLM call.
 
-    Measured at the source (each call) rather than reconstructed later — 
+    Measured at the source (each call) rather than reconstructed later —
     every call in the system (agent, user-sim, judge) reports through this type
     and per-episode totals are a single ``sum()``.
     """

@@ -41,8 +41,7 @@ class MockModel(AgentModel):
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             cost_usd=(
-                input_tokens * _FAKE_USD_PER_MTOK_INPUT
-                + output_tokens * _FAKE_USD_PER_MTOK_OUTPUT
+                input_tokens * _FAKE_USD_PER_MTOK_INPUT + output_tokens * _FAKE_USD_PER_MTOK_OUTPUT
             )
             / 1e6,
             # Deterministic pseudo-latency in [0.01, 0.11) — varies per call like the

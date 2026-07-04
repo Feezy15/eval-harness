@@ -44,7 +44,9 @@ class Config(_StrictModel):
     run_name: str
     output_dir: Path
     seeds: list[int] = Field(min_length=1)
-    max_turns: int = Field(ge=1)  # hard cap per episode — bounds cost even if the user-sim never stops
+    max_turns: int = Field(
+        ge=1
+    )  # hard cap per episode — bounds cost even if the user-sim never stops
     tasks: list[TaskConfig] = Field(min_length=1)
     models: list[ModelConfig] = Field(min_length=1)
     user_sim: UserSimConfig

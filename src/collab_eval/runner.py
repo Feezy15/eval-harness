@@ -196,7 +196,9 @@ def _write_csv(path: Path, results: list[EpisodeResult]) -> None:
 
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description="Run the collaborative-effort evaluation matrix.")
-    parser.add_argument("--config", required=True, type=Path, help="Path to a YAML experiment config")
+    parser.add_argument(
+        "--config", required=True, type=Path, help="Path to a YAML experiment config"
+    )
     args = parser.parse_args(argv)
 
     config = load_config(args.config)

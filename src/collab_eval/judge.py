@@ -13,7 +13,7 @@ from collections.abc import Sequence
 
 from collab_eval.models.mock import MockModel
 from collab_eval.tasks.base import Task
-from collab_eval.types import JudgeScore, Message, Usage
+from collab_eval.types import JudgeScore, Message
 
 
 class Judge(ABC):
