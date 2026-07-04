@@ -4,9 +4,10 @@ Kept in one module so every component (tasks, models, user-sim, judge, runner)
 speaks the same types — the interfaces stay small and swappable.
 """
 
+from datetime import datetime
 from typing import Literal, Self
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 # The independent variable of the whole study: how involved the simulated user is.
 # A Literal (not an Enum) so it reads/writes as a plain string in YAML configs and JSONL logs.
@@ -53,3 +54,45 @@ class ModelResponse(BaseModel):
 
     message: Message
     usage: Usage
+
+
+class JudgeScore(BaseModel):
+    score: float = Field(ge=0.0, le=1.0)  # normalized so scores are comparable across tasks
+    rationale: str
+    # Judge scores are only comparable under the same rubric; stamping the version
+    # on every score means a later rubric tweak can't silently mix incomparable
+    # numbers into one plot.
+    rubric_version: str
+    usage: Usage
+
+
+class TurnRecord(BaseModel):
+    """One logged LLM call within an episode, in call order."""
+
+    turn_index: int
+    actor: Literal["agent", "user_sim"]
+    # None = the user-sim's stop decision: a real, costed LLM call that produces
+    # no conversational turn. Recording it keeps cost accounting exact.
+    message: Message | None
+    usage: Usage
+
+
+class EpisodeResult(BaseModel):
+    """One episode = one cell of the (task x model x effort x seed) matrix.
+
+    Serialized as one JSONL line per episode; the flat CSV summary is derived
+    from this, never the other way around.
+    """
+
+    run_name: str
+    episode_id: str
+    task: str
+    model: str
+    effort: EffortLevel
+    seed: int
+    transcript: list[Message]
+    turns: list[TurnRecord]
+    totals: Usage  # summed over every logged call: agent + user-sim + judge
+    judge: JudgeScore
+    started_at: datetime
+    config_hash: str
