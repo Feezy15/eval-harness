@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Collaborative-effort evaluation harness: measures how LLM-agent utility scales with user involvement across multi-turn tasks, plus cost/latency-vs-utility analysis."
 readme = "README.md"
 license = { text = "MIT" }
-# Pinned to 3.12: reproducibility is a first-class feature (PROJECT.md §5) — the same
+# Pinned to 3.12: reproducibility is a first-class feature — the same
 # interpreter runs locally (via uv), in CI, and in Docker. Exact package versions live in uv.lock.
 requires-python = "==3.12.*"
 dependencies = [

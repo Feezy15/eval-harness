@@ -1,6 +1,6 @@
 """Experiment configuration: pydantic schema + YAML loader.
 
-All experiment knobs live here (PROJECT.md: "No hardcoded params in code").
+All experiment knobs live here.
 Every model uses ``extra="forbid"`` so a typo'd key fails at load time instead of
 silently running a different experiment — config bugs are the cheapest bugs to
 catch and the most expensive to discover in a results plot.
