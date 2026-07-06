@@ -1,6 +1,9 @@
 # --- secrets / environment ---
 .env
 .env.*
+
+# --- personal tool settings (per-user, not shared) ---
+.claude/settings.local.json
 *.key
 *.pem
 secrets.*
