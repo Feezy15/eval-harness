@@ -94,8 +94,10 @@ Each milestone has a **Definition of Done (DoD)**. Status markers: ✅ done · �
 Repo skeleton, config loading, interfaces defined, a **mock model** so the loop runs with no API cost.
 - **DoD:** `python -m collab_eval.runner --config configs/smoke.yaml` runs end-to-end on the mock model and
   writes results JSONL/CSV; `pytest` passes.
-- **Status (2026-07-03):** DoD met — `uv run python -m collab_eval.runner --config configs/smoke.yaml`
-  writes 6 mock episodes to JSONL + CSV; 15 tests green; see `docs/architecture.md` for what was built.
+- **Status (2026-07-05):** DoD met and review-hardened — `uv run python -m collab_eval.runner --config
+  configs/smoke.yaml` writes 6 mock episodes to JSONL + CSV; 28 tests green; config rejects duplicate
+  matrix cells and unique model labels are episode identity; keyless CI pulled forward from M3.
+  See `docs/architecture.md` for what was built and why.
 
 ### 🔜 M1 — MVP (reproduce the core idea)
 1 real task (`trip_planning`), 2 models, 3 effort levels, LLM-as-judge rubric; produce the **utility-vs-effort** plot.
@@ -107,8 +109,8 @@ task and/or an open-weight model.
 - **DoD:** a cost-vs-utility plot (not in the paper) plus a short written takeaway.
 
 ### ⬜ M3 — Reproducibility & engineering polish
-Dockerfile, pinned deps, fixed seeds, config-driven matrix, unit tests + GitHub Actions CI (mock model, no keys),
-response caching.
+Dockerfile, pinned deps, fixed seeds, config-driven matrix, unit tests + GitHub Actions CI (mock model, no
+keys — landed early, in M0), response caching.
 - **DoD:** `docker run … --config configs/experiment.yaml` reproduces results from a clean machine; CI green;
   adding a new task/model is documented and small.
 

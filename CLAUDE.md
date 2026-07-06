@@ -95,11 +95,14 @@ decisions (with the why and known gaps) in `docs/architecture.md` and new comman
 
 ## Current status
 
-**M0 (scaffold & plumbing) complete** on branch `m0-scaffold`, PR to `main` pending review. DoD verified:
-`uv run python -m collab_eval.runner --config configs/smoke.yaml` runs the full mock matrix (6 episodes)
-and writes `results/smoke.jsonl` + `.csv`; `uv run pytest` green (15 tests, red-bar TDD); ruff clean.
-Built: strict config loading, shared types, MockModel/MockJudge, UserSimulator, episode loop + matrix
-runner, registries. Design decisions + gaps: `docs/architecture.md`.
+**M0 (scaffold & plumbing) complete and review-hardened** on branch `m0-scaffold`, PR #1 to `main`
+pending merge. DoD verified: `uv run python -m collab_eval.runner --config configs/smoke.yaml` runs
+the full mock matrix (6 episodes) and writes `results/smoke.jsonl` + `.csv`; `uv run pytest` green
+(28 tests, red-bar TDD); ruff clean. Built: strict config loading (duplicate-cell rejection, unique
+model labels as episode identity), shared types, MockModel/MockJudge, UserSimulator (temperature in
+config), episode loop + matrix runner (agent temperature recorded per episode), registries, and
+keyless CI (pulled forward from M3). Design decisions + gaps: `docs/architecture.md` (see 10–12 for
+the review-hardening round).
 
 **Next: M1** (trip_planning task, OpenAI + Anthropic wrappers, real effort prompts, LLM judge + rubric v1,
 utility-vs-effort plot). See `docs/PROJECT.md` for M0–M4.

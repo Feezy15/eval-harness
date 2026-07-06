@@ -70,7 +70,9 @@ Everything is config-driven — no hardcoded parameters. Define the experiment m
 
 ## Extending it
 
-Add a `Task`, `AgentModel`, or `UserSimulator` subclass and reference it in a config — no core changes needed.
+Add a `Task` or `AgentModel` implementation, register it (one line in the module's registry), and
+reference it by name in config. The user simulator is deliberately a single concrete class — its
+backing model, temperature, and effort levels are all config, not subclasses.
 See [`docs/architecture.md`](docs/architecture.md) for the system design, interfaces, and decision log,
 and [`docs/PROJECT.md`](docs/PROJECT.md) for the research spec and milestones.
 

@@ -69,15 +69,17 @@ configs/*.yaml ──► Config (pydantic, strict)
 
 Scaffold and plumbing (milestone M0), fully runnable with **no API keys and no network**:
 
-- Config loading with strict validation (`configs/smoke.yaml`)
+- Config loading with strict validation (`configs/smoke.yaml`): unknown keys, duplicate matrix
+  cells, and blank/colliding model labels all fail at load time
 - The complete episode loop and matrix runner, JSONL + CSV output
 - `MockModel` / `MockJudge` for deterministic zero-cost runs
-- 15 tests: config validation, mock determinism, end-to-end matrix contract
-- Toolchain: uv + Python 3.12 (pinned), pytest, ruff
+- 28 tests: config validation (incl. identity/duplicate rejection), mock determinism, end-to-end
+  matrix contract
+- Toolchain: uv + Python 3.12 (pinned), pytest, ruff, keyless GitHub Actions CI
 
 Not yet built: real provider wrappers (OpenAI/Anthropic), real tasks (`trip_planning`,
 `csv_cleaning`), the LLM judge and its rubric, effort-prompt engineering, analysis/plots, response
-caching, Docker, CI. See [PROJECT.md](PROJECT.md) milestones M1–M4.
+caching, Docker. See [PROJECT.md](PROJECT.md) milestones M1–M4.
 
 ## Key design decisions
 
@@ -104,6 +106,9 @@ which effort), not a second class hierarchy.
 - **Gaps:** the effort prompts are placeholders — operationalizing "effort" is the central
   prompt-engineering task of M1 and will need iteration + a sensitivity check (a stretch goal). No
   persona or hidden-preference state yet (needed for richer user types like `novice`/`adversarial`).
+  The prompts are also invisible to `config_hash`: a `prompts_version` stamp (cf. `rubric_version`)
+  must land together with the real prompts, or a later prompt edit silently changes the experiment
+  under an identical hash.
 
 ### 3. The sim's goal lives in its system prompt; conversation history is role-flipped
 
@@ -154,7 +159,11 @@ never spliced into the judge's system prompt.
   is something the judge reads, not an instruction it follows.
 - **Gaps:** `MockJudge`'s hash-derived score is plumbing, not measurement. LLM-judge bias,
   rubric robustness to adversarial transcripts, and judge-model sensitivity are open until the real
-  judge lands (and are honest limitations even then).
+  judge lands (and are honest limitations even then). The `[role] content` rendering is also
+  forgeable — verified: an assistant message embedding `"\n[user] …"` renders byte-identically to a
+  real user turn, so an agent can fabricate user approval the judge can't detect. Harmless for the
+  hash-based mock; must be fixed (fenced/indexed message blocks, rubric treats only fenced blocks as
+  data) before the real judge scores anything.
 
 ### 7. JSONL streamed per episode; CSV derived from it
 
@@ -191,16 +200,65 @@ every record carries the config hash; the toolchain pins Python 3.12 and exact d
   become *replicate indices* (samples for mean ± spread), not exact replays. Response caching
   (planned) will make reruns cheap, not bit-identical.
 
+### 10. Model labels are experiment identity; configs reject duplicate matrix cells
+
+Every `models:` entry carries a unique `label` (default `provider:model`) that becomes the episode
+id and the `model` result column; blank labels are invalid; duplicate seeds, effort levels, task
+names, and labels are rejected at load. The agent's sampling temperature is stamped into every
+episode record and the CSV.
+
+- **Why:** identity bugs are silent. Two entries differing only in temperature used to produce
+  identical episode ids, so aggregation pooled two different sampling distributions into one curve
+  with no error anywhere. Defaulting the label but *refusing* to auto-disambiguate makes naming a
+  variant (`gpt-4o-t0` vs `gpt-4o-t1`) a conscious act. Recording temperature per episode makes a
+  results file self-describing — `config_hash` is one-way and can't be decoded back into parameter
+  values. Review then found the falsy edge (an empty label passed uniqueness but fell back to the
+  raw model name — the same collision through a side door), which is why both ends validate: config
+  rejects blank labels, and the runner falls back only on `None`.
+- **Gaps:** the episode id does not include the user-sim's identity — fine while a run has exactly
+  one sim (decision 11), but it must be revisited if `user_sim` ever becomes a list. The sim's
+  temperature is not recorded per episode (only via `config_hash`).
+
+### 11. One user-sim per run; its temperature is config, not code
+
+A run has exactly one `user_sim` (provider + model + temperature) applied across all effort levels.
+Sim-robustness checks (does the finding survive a different sim model or temperature?) are separate
+runs compared in analysis, not a matrix dimension.
+
+- **Why:** the sim is measurement *apparatus*; the treatment is the effort level, which varies
+  inside the sim's prompt. Widening the matrix with sim variants would multiply cost without serving
+  the core question. The temperature still must live in config rather than code because it shapes
+  how the treatment is delivered — as experiment-defining as the agent's temperature — and config
+  placement feeds `config_hash` for free, so two runs with different sim sampling can never share an
+  experiment identity.
+- **Gaps:** the effort prompts that operationalize the treatment are still unversioned (decision 2
+  gaps); the judge's sampling params are similarly fixed in code (`MockJudge` pins `seed=0`) and
+  will need the same config treatment when the real judge lands.
+
+### 12. Keyless CI from the first milestone
+
+GitHub Actions runs ruff (lint + format), pytest, and the literal smoke command on every PR, under a
+read-only token. Originally planned for M3; pulled forward.
+
+- **Why:** the suite runs on the mock model in seconds with no keys, so there was no reason to leave
+  `main` human-gated for three milestones. The smoke-run step doubles as the end-to-end test of the
+  CLI entrypoint (argparse → config load → matrix → result files) that the unit suite doesn't cover.
+  The read-only token makes "CI can never mutate the repo" true by construction, not just by the
+  absence of write steps.
+- **Gaps:** no coverage reporting or concurrency cancellation; actions are tag-pinned, not
+  SHA-pinned.
+
 ## Testing strategy
 
 Tests were written red-first (each test file failed before its implementation existed):
 
 - `tests/test_config.py` — schema round-trip and every fail-loud path (unknown key, missing field,
-  bad effort level)
+  bad effort level, duplicate matrix cells, blank/colliding labels, temperature bounds)
 - `tests/test_mock_model.py` — mock determinism, nonzero synthetic usage, `Usage` arithmetic
 - `tests/test_runner_smoke.py` — the end-to-end contract: matrix completeness, JSONL round-trip,
   CSV shape, transcript alternation, turn cap, total-cost accounting (no untracked calls), replay
-  determinism, and early stop via a stub sim backend
+  determinism, early stop via a stub sim backend, temperature-variant identity separation, and
+  config-driven sim temperature
 
 Run with `uv run pytest` — no keys, no network.
 
