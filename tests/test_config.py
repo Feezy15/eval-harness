@@ -68,3 +68,77 @@ def test_invalid_effort_level_rejected(tmp_path):
     data["user_sim"]["effort_levels"] = ["passive", "sleepy"]
     with pytest.raises(ValidationError):
         load_config(_write_yaml(tmp_path, data))
+
+
+# --- duplicate matrix cells ---------------------------------------------------
+# A duplicate seed/effort/task/model entry re-runs the same cell and writes rows
+# with identical identity — aggregation would silently pool them. Reject at load.
+
+
+def test_duplicate_seeds_rejected(tmp_path):
+    data = _smoke_dict()
+    data["seeds"] = [0, 0, 1]
+    with pytest.raises(ValidationError, match="duplicate"):
+        load_config(_write_yaml(tmp_path, data))
+
+
+def test_duplicate_effort_levels_rejected(tmp_path):
+    data = _smoke_dict()
+    data["user_sim"]["effort_levels"] = ["passive", "passive"]
+    with pytest.raises(ValidationError, match="duplicate"):
+        load_config(_write_yaml(tmp_path, data))
+
+
+def test_duplicate_task_names_rejected(tmp_path):
+    data = _smoke_dict()
+    data["tasks"] = [{"name": "toy"}, {"name": "toy"}]
+    with pytest.raises(ValidationError, match="duplicate"):
+        load_config(_write_yaml(tmp_path, data))
+
+
+# --- model labels -------------------------------------------------------------
+# The label is the model entry's identity in episode ids and result rows, so
+# entries sharing a provider+model (e.g. a temperature ablation) must be told
+# apart by explicit labels — otherwise their results are indistinguishable.
+
+
+def test_model_label_defaults_to_provider_model():
+    cfg = load_config(SMOKE_YAML)
+    assert cfg.models[0].label == "mock:mock-agent"
+
+
+def test_temperature_variants_without_labels_rejected(tmp_path):
+    data = _smoke_dict()
+    data["models"] = [
+        {"provider": "mock", "model": "mock-agent", "temperature": 0.0},
+        {"provider": "mock", "model": "mock-agent", "temperature": 1.0},
+    ]
+    with pytest.raises(ValidationError, match="label"):
+        load_config(_write_yaml(tmp_path, data))
+
+
+def test_temperature_variants_with_distinct_labels_accepted(tmp_path):
+    data = _smoke_dict()
+    data["models"] = [
+        {"provider": "mock", "model": "mock-agent", "temperature": 0.0, "label": "agent-t0"},
+        {"provider": "mock", "model": "mock-agent", "temperature": 1.0, "label": "agent-t1"},
+    ]
+    cfg = load_config(_write_yaml(tmp_path, data))
+    assert [m.label for m in cfg.models] == ["agent-t0", "agent-t1"]
+
+
+def test_duplicate_explicit_labels_rejected(tmp_path):
+    data = _smoke_dict()
+    data["models"] = [
+        {"provider": "mock", "model": "agent-a", "label": "same"},
+        {"provider": "mock", "model": "agent-b", "label": "same"},
+    ]
+    with pytest.raises(ValidationError, match="duplicate"):
+        load_config(_write_yaml(tmp_path, data))
+
+
+def test_negative_temperature_rejected(tmp_path):
+    data = _smoke_dict()
+    data["models"][0]["temperature"] = -0.5
+    with pytest.raises(ValidationError):
+        load_config(_write_yaml(tmp_path, data))
