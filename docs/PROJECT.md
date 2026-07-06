@@ -88,29 +88,33 @@ Docker, GitHub Actions CI. Optional: vLLM (open-weight models), Weights & Biases
 
 ## 4. Milestones
 
-Each milestone has a **Definition of Done (DoD)**.
+Each milestone has a **Definition of Done (DoD)**. Status markers: ✅ done · 🔜 next · ⬜ not started.
 
-### M0 — Scaffold & plumbing
+### ✅ M0 — Scaffold & plumbing
 Repo skeleton, config loading, interfaces defined, a **mock model** so the loop runs with no API cost.
 - **DoD:** `python -m collab_eval.runner --config configs/smoke.yaml` runs end-to-end on the mock model and
   writes results JSONL/CSV; `pytest` passes.
+- **Status (2026-07-05):** DoD met and review-hardened — `uv run python -m collab_eval.runner --config
+  configs/smoke.yaml` writes 6 mock episodes to JSONL + CSV; 28 tests green; config rejects duplicate
+  matrix cells and unique model labels are episode identity; keyless CI pulled forward from M3.
+  See `docs/architecture.md` for what was built and why.
 
-### M1 — MVP (reproduce the core idea)
+### 🔜 M1 — MVP (reproduce the core idea)
 1 real task (`trip_planning`), 2 models, 3 effort levels, LLM-as-judge rubric; produce the **utility-vs-effort** plot.
 - **DoD:** a plot showing utility rising with involvement, and a note on where agents plateau/underperform.
 
-### M2 — The extension (cost/latency-vs-utility)
+### ⬜ M2 — The extension (cost/latency-vs-utility)
 Add token/cost/latency logging and render **utility-per-dollar** and **utility-per-second** curves; add a 2nd
 task and/or an open-weight model.
 - **DoD:** a cost-vs-utility plot (not in the paper) plus a short written takeaway.
 
-### M3 — Reproducibility & engineering polish
-Dockerfile, pinned deps, fixed seeds, config-driven matrix, unit tests + GitHub Actions CI (mock model, no keys),
-response caching.
+### ⬜ M3 — Reproducibility & engineering polish
+Dockerfile, pinned deps, fixed seeds, config-driven matrix, unit tests + GitHub Actions CI (mock model, no
+keys — landed early, in M0), response caching.
 - **DoD:** `docker run … --config configs/experiment.yaml` reproduces results from a clean machine; CI green;
   adding a new task/model is documented and small.
 
-### M4 — Writeup & release
+### ⬜ M4 — Writeup & release
 README with question, method, findings (plots), **honest limitations**, and a "how to add a task/model/user type"
 section.
 - **DoD:** public repo; README skimmable in two minutes.

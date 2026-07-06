@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-Operating guide for Claude Code in this repo. **Full spec and milestones are in `PROJECT.md` — read it first.** This file is the operating manual; keep it short and current (a stale context file is worse than none).
+Operating guide for Claude Code in this repo. **Full spec and milestones are in `docs/PROJECT.md` — read it first.** This file is the operating manual; keep it short and current (a stale context file is worse than none). System design + decision log: `docs/architecture.md`.
 
 ## Project overview
 
@@ -22,7 +22,7 @@ Code quality, reproducibility, tests, and a clean README matter as much as resul
 - Config & validation: pydantic + YAML
 - Analysis: pandas + matplotlib
 - Tests: pytest
-- Reproducibility: Docker, pinned deps (pyproject.toml or requirements.txt)
+- Reproducibility: Docker, uv (Python 3.12 pinned via `.python-version`; exact deps in `uv.lock`)
 - CI: GitHub Actions (runs tests on the mock model, no API keys)
 - Optional: Weights & Biases for run tracking
 
@@ -38,31 +38,41 @@ Code quality, reproducibility, tests, and a clean README matter as much as resul
 
 ## Commands
 
-- Smoke run (no API cost): `python -m collab_eval.runner --config configs/smoke.yaml`
-- Real run: `python -m collab_eval.runner --config configs/experiment.yaml`
-- Tests: `pytest`
-- Plots: `python -m collab_eval.analysis --results results/<run>.jsonl`
-- Docker: `docker build -t collab-eval . && docker run --rm collab-eval ...`
+- Setup: `uv sync` (installs pinned Python 3.12 + deps into `.venv`)
+- Smoke run (no API cost): `uv run python -m collab_eval.runner --config configs/smoke.yaml`
+- Real run (M1+): `uv run python -m collab_eval.runner --config configs/experiment.yaml`
+- Tests: `uv run pytest`
+- Lint/format: `uv run ruff check .` and `uv run ruff format .`
+- Plots (M1+): `uv run python -m collab_eval.analysis --results results/<run>.jsonl`
+- Docker (M3): `docker build -t collab-eval . && docker run --rm collab-eval ...`
 - (Keep this list updated as commands solidify.)
 
 ## How we work (spec-driven, small loops)
 
-- **Plan → Execute → Review, in tight loops.** Before anything non-trivial, propose a short plan and wait for
-approval. Implement ONE atomic task, then stop for review. Small human-in-the-loop cycles beat big autonomous runs.
-- **Spec before code.** Work from `PROJECT.md`; each milestone's Definition of Done is the success criterion —
+Follow **Plan → Execute → Review**, in small loops with a checkpoint between each.
+
+- **Plan first.** Before writing code for anything non-trivial, produce a short spec: what we're building, the discrete steps, and the success criteria for each. Surface any ambiguities or open questions **and wait for my answer** — do not guess and run off. A wrong assumption compounds fast.
+- **Spec before code.** Work from `docs/PROJECT.md`; each milestone's Definition of Done is the success criterion —  
 don't advance until the current task meets it.
-- **Surface open questions — don't guess.** If a requirement is ambiguous, ask rather than inventing an answer.
-- **Decompose.** Small, verifiable chunks. Avoid large multi-file changes in one pass — they pollute context
+- **Decompose.** Small, verifiable chunks. Avoid large multi-file changes in one pass — they pollute context  
 and produce slop that's hard to recover from.
+
+**Branching workflow (GitHub Flow adapted for milestones):**
+
+- `main` = verified milestone checkpoints only. Each milestone lands on `main` as one PR merge; direct commits to `main` are limited to repo housekeeping (gitignore, CLAUDE.md updates not tied to in-progress code).
+- **Milestone branches:** `m{N}-{short-name}`. Create the branch at the start of the milestone; open the PR when the gate passes verification.
+- **Sub-feature branches** (optional, when a milestone chunk grows large enough): `m{N}-{short-name}/{feature}` — e.g. `m2-api/schema-migration`. Merge back into the milestone branch, not directly into `main`.
 
 ## Verification (the real bottleneck — do not skip)
 
-- **Tests first where practical (TDD).** Write/adjust the test before the implementation; new tests should fail,
-then pass incrementally (unit → integration → end-to-end; don't over-index on unit tests alone).
+Generation is the fast part; verification is the rate-limiting part, and that's where the bugs hide. Treat it as the bulk of the work, not an afterthought.
+
+- **Tests first where practical (TDD):** Write the test file, **run** `pytest` **and confirm it red-bars**, then write the implementation to make it pass. Writing tests and implementation in the same batch (parallel writes, same message) does **not** satisfy this requirement; it skips the red bar, which is the only proof that the test is genuinely testing something and not accidentally passing against an already written implementation. New tests should fail, then pass incrementally (unit → integration → end-to-end; don't over-index on unit tests alone).
 - **Green gate before "done":** run `pytest` (on the mock model) plus lint/format (ruff/black) and type checks
 before considering any task complete.
 - **Generated code is a draft, not a commit.** Every atomic change gets reviewed; prove it works rather than
 assuming. If you find one bug/edge case, check for the same pattern elsewhere.
+- When I review, explain *why* something works, not just that it passes.
 
 ## Guardrails (IMPORTANT)
 
@@ -79,10 +89,20 @@ be robust to manipulation.
 
 ## Documentation (continuous, not after-the-fact)
 
-- Update the README, this file, and `PROJECT.md`'s status as decisions are made — capture key design decisions
-and new commands as you go.
+- Update the README, this file, and `docs/PROJECT.md`'s status as decisions are made — capture key design
+decisions (with the why and known gaps) in `docs/architecture.md` and new commands as you go.
 - Write honest limitations in the README (small N, LLM-judge bias, prompt sensitivity).
 
 ## Current status
 
-Starting **Milestone M0** (scaffold + mock-model run + smoke test). See `PROJECT.md` for M0–M4.
+**M0 (scaffold & plumbing) complete and review-hardened** on branch `m0-scaffold`, PR #1 to `main`
+pending merge. DoD verified: `uv run python -m collab_eval.runner --config configs/smoke.yaml` runs
+the full mock matrix (6 episodes) and writes `results/smoke.jsonl` + `.csv`; `uv run pytest` green
+(28 tests, red-bar TDD); ruff clean. Built: strict config loading (duplicate-cell rejection, unique
+model labels as episode identity), shared types, MockModel/MockJudge, UserSimulator (temperature in
+config), episode loop + matrix runner (agent temperature recorded per episode), registries, and
+keyless CI (pulled forward from M3). Design decisions + gaps: `docs/architecture.md` (see 10–12 for
+the review-hardening round).
+
+**Next: M1** (trip_planning task, OpenAI + Anthropic wrappers, real effort prompts, LLM judge + rubric v1,
+utility-vs-effort plot). See `docs/PROJECT.md` for M0–M4.

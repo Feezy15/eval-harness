@@ -36,17 +36,20 @@ first full run._
 ## Quickstart
 
 ```bash
-git clone <repo-url> && cd collab-effort-eval
-pip install -r requirements.txt          # or: pip install -e .
+git clone <repo-url> && cd eval-harness
+uv sync   # installs the pinned Python 3.12 + exact locked deps (get uv: https://docs.astral.sh/uv/)
 
 # No-cost smoke run on the mock model
-python -m collab_eval.runner --config configs/smoke.yaml
+uv run python -m collab_eval.runner --config configs/smoke.yaml
 
-# Real run (set OPENAI_API_KEY / ANTHROPIC_API_KEY first)
-python -m collab_eval.runner --config configs/experiment.yaml
+# Tests + lint (no keys, no network)
+uv run pytest && uv run ruff check .
 
-# Render plots from a results file
-python -m collab_eval.analysis --results results/<run>.jsonl
+# Real run (coming in M1 — set OPENAI_API_KEY / ANTHROPIC_API_KEY first)
+uv run python -m collab_eval.runner --config configs/experiment.yaml
+
+# Render plots from a results file (coming in M1)
+uv run python -m collab_eval.analysis --results results/<run>.jsonl
 ```
 
 ## Configuration
@@ -67,8 +70,11 @@ Everything is config-driven — no hardcoded parameters. Define the experiment m
 
 ## Extending it
 
-Add a `Task`, `AgentModel`, or `UserSimulator` subclass and reference it in a config — no core changes needed.
-See `PROJECT.md` for interface details.
+Add a `Task` or `AgentModel` implementation, register it (one line in the module's registry), and
+reference it by name in config. The user simulator is deliberately a single concrete class — its
+backing model, temperature, and effort levels are all config, not subclasses.
+See [`docs/architecture.md`](docs/architecture.md) for the system design, interfaces, and decision log,
+and [`docs/PROJECT.md`](docs/PROJECT.md) for the research spec and milestones.
 
 ## Limitations
 
