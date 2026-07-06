@@ -137,6 +137,22 @@ def test_duplicate_explicit_labels_rejected(tmp_path):
         load_config(_write_yaml(tmp_path, data))
 
 
+def test_empty_label_rejected(tmp_path):
+    # An empty label would make the runner fall back to the raw model name,
+    # reopening the identity collision labels exist to prevent.
+    data = _smoke_dict()
+    data["models"][0]["label"] = ""
+    with pytest.raises(ValidationError):
+        load_config(_write_yaml(tmp_path, data))
+
+
+def test_whitespace_label_rejected(tmp_path):
+    data = _smoke_dict()
+    data["models"][0]["label"] = "   "
+    with pytest.raises(ValidationError):
+        load_config(_write_yaml(tmp_path, data))
+
+
 def test_negative_temperature_rejected(tmp_path):
     data = _smoke_dict()
     data["models"][0]["temperature"] = -0.5

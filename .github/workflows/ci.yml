@@ -2,6 +2,11 @@
 # so a fork or PR can never spend money or leak secrets.
 name: ci
 
+# Read-only token: makes "CI can never mutate the repo" true by construction,
+# not just by the absence of write steps.
+permissions:
+  contents: read
+
 on:
   push:
     branches: [main]

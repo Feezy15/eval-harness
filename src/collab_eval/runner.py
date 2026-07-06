@@ -53,7 +53,9 @@ def run_episode(
     config entries that share a base model (e.g. a temperature ablation) pass
     distinct labels so their results stay distinguishable. Defaults to the
     agent's own name for standalone use."""
-    label = model_label or agent.name
+    # `is not None`, not truthiness: a falsy-but-present label must never silently
+    # alias an episode to a different identity.
+    label = model_label if model_label is not None else agent.name
     started_at = datetime.now(UTC)
     # The Task authors the opening goal verbatim (seeded): turn 1 is part of the
     # controlled condition — identical across effort levels and models — so the

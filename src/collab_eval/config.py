@@ -43,6 +43,10 @@ class ModelConfig(_StrictModel):
 
     @model_validator(mode="after")
     def _default_label(self) -> "ModelConfig":
+        if self.label is not None and not self.label.strip():
+            # A blank label would fall back to the raw model name downstream,
+            # reopening the identity collision labels exist to prevent.
+            raise ValueError("label must be non-empty; omit it to default to provider:model")
         if self.label is None:
             self.label = f"{self.provider}:{self.model}"
         return self
