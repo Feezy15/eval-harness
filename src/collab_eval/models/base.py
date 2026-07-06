@@ -13,6 +13,7 @@ from collab_eval.types import Message, ModelResponse
 
 class AgentModel(ABC):
     name: str  # e.g. "mock:mock-agent", "openai:gpt-4o-mini" — stamped into result logs
+    temperature: float  # sampling temperature — part of the experimental condition, stamped into results
 
     @abstractmethod
     def next_turn(self, conversation: Sequence[Message]) -> ModelResponse:

@@ -9,6 +9,8 @@ import csv
 from collections.abc import Sequence
 from pathlib import Path
 
+import yaml
+
 from collab_eval.config import load_config
 from collab_eval.judge import MockJudge
 from collab_eval.models.base import AgentModel
@@ -57,6 +59,7 @@ def test_matrix_writes_flat_csv_summary(tmp_path):
         "seed",
         "n_agent_turns",
         "n_user_turns",
+        "temperature",
         "score",
         "rubric_version",
         "input_tokens",
@@ -94,6 +97,35 @@ def test_transcript_structure_turn_cap_and_totals(tmp_path):
         # cost accounting must have no untracked calls.
         recomputed = sum((t.usage for t in ep.turns), Usage.zero()) + ep.judge.usage
         assert ep.totals == recomputed
+
+
+def test_temperature_variants_are_distinct_conditions(tmp_path):
+    # Two entries sharing a base model but differing in temperature are two
+    # experimental conditions: identity (episode_id, model column) and the
+    # recorded temperature must keep their result rows apart, or aggregation
+    # pools different sampling distributions into one curve.
+    data = yaml.safe_load(SMOKE_YAML.read_text())
+    data["models"] = [
+        {"provider": "mock", "model": "mock-agent", "temperature": 0.0, "label": "agent-t0"},
+        {"provider": "mock", "model": "mock-agent", "temperature": 1.0, "label": "agent-t1"},
+    ]
+    cfg_path = tmp_path / "config.yaml"
+    cfg_path.write_text(yaml.safe_dump(data))
+    results = run_matrix(load_config(cfg_path), output_dir=tmp_path)
+
+    assert len(results) == 2 * EXPECTED_EPISODES
+    ids = [ep.episode_id for ep in results]
+    assert len(set(ids)) == len(ids)
+    assert {ep.model for ep in results} == {"agent-t0", "agent-t1"}
+    for ep in results:
+        assert ep.temperature == (0.0 if ep.model == "agent-t0" else 1.0)
+
+    with (tmp_path / "smoke.csv").open() as f:
+        rows = list(csv.DictReader(f))
+    assert {(row["model"], row["temperature"]) for row in rows} == {
+        ("agent-t0", "0.0"),
+        ("agent-t1", "1.0"),
+    }
 
 
 def test_rerun_is_deterministic(tmp_path):

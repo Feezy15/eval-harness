@@ -44,9 +44,16 @@ def run_episode(
     max_turns: int,
     run_name: str = "adhoc",
     config_hash: str = "adhoc",
+    model_label: str | None = None,
 ) -> EpisodeResult:
     """One episode: agent and simulated user alternate until the user stops
-    or the turn cap is hit; then the judge scores the transcript."""
+    or the turn cap is hit; then the judge scores the transcript.
+
+    `model_label` is the agent's identity in the episode id and result rows —
+    config entries that share a base model (e.g. a temperature ablation) pass
+    distinct labels so their results stay distinguishable. Defaults to the
+    agent's own name for standalone use."""
+    label = model_label or agent.name
     started_at = datetime.now(UTC)
     # The Task authors the opening goal verbatim (seeded): turn 1 is part of the
     # controlled condition — identical across effort levels and models — so the
@@ -87,9 +94,10 @@ def run_episode(
     totals = sum((t.usage for t in turns), Usage.zero()) + judge_score.usage
     return EpisodeResult(
         run_name=run_name,
-        episode_id=f"{task.name}__{agent.name}__{user_sim.effort}__s{seed}",
+        episode_id=f"{task.name}__{label}__{user_sim.effort}__s{seed}",
         task=task.name,
-        model=agent.name,
+        model=label,
+        temperature=agent.temperature,
         effort=user_sim.effort,
         seed=seed,
         transcript=conversation,
@@ -124,7 +132,12 @@ def run_matrix(config: Config, output_dir: str | Path | None = None) -> list[Epi
                         agent = _build_model(model_cfg, seed)
                         sim_model = _build_model(
                             ModelConfig(
-                                provider=config.user_sim.provider, model=config.user_sim.model
+                                provider=config.user_sim.provider,
+                                model=config.user_sim.model,
+                                # Pinned: the sim is measurement apparatus, not
+                                # treatment — effort level is the variable under
+                                # study (same rationale as the judge's fixed seed).
+                                temperature=0.7,
                             ),
                             seed,
                         )
@@ -137,6 +150,7 @@ def run_matrix(config: Config, output_dir: str | Path | None = None) -> list[Epi
                             max_turns=config.max_turns,
                             run_name=config.run_name,
                             config_hash=config_hash,
+                            model_label=model_cfg.label,
                         )
                         jsonl_file.write(episode.model_dump_json() + "\n")
                         results.append(episode)
@@ -150,6 +164,7 @@ _CSV_COLUMNS = [
     "episode_id",
     "task",
     "model",
+    "temperature",
     "effort",
     "seed",
     "n_agent_turns",
@@ -171,6 +186,7 @@ def _episode_row(ep: EpisodeResult) -> dict[str, object]:
         "episode_id": ep.episode_id,
         "task": ep.task,
         "model": ep.model,
+        "temperature": ep.temperature,
         "effort": ep.effort,
         "seed": ep.seed,
         "n_agent_turns": sum(1 for t in ep.turns if t.actor == "agent"),

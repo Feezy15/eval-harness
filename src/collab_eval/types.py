@@ -87,7 +87,13 @@ class EpisodeResult(BaseModel):
     run_name: str
     episode_id: str
     task: str
+    # The config entry's label, not the raw provider model name: two entries may
+    # share a base model and differ only in sampling params.
     model: str
+    # Recorded per episode so a results file is self-describing — the sampling
+    # temperature is part of the experimental condition, and the config hash
+    # alone is one-way (it can't be decoded back into parameter values).
+    temperature: float
     effort: EffortLevel
     seed: int
     transcript: list[Message]
