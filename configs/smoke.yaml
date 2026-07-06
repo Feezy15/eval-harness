@@ -16,6 +16,7 @@ models:
 user_sim:
   provider: mock
   model: mock-user
+  temperature: 0.7  # one pinned value per run — the sim is apparatus, not treatment
   effort_levels: [passive, moderate, active_steering]
 
 judge:

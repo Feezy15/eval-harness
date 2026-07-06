@@ -128,6 +128,23 @@ def test_temperature_variants_are_distinct_conditions(tmp_path):
     }
 
 
+def test_user_sim_temperature_flows_from_config(tmp_path):
+    # The sim's sampling temperature is part of the experiment definition, so
+    # the config knob must actually reach the sim model — a code-pinned value
+    # would make two different experiments produce an identical config_hash.
+    data = yaml.safe_load(SMOKE_YAML.read_text())
+    base_path = tmp_path / "base.yaml"
+    base_path.write_text(yaml.safe_dump(data))
+    base = run_matrix(load_config(base_path), output_dir=tmp_path / "a")
+
+    data["user_sim"]["temperature"] = 0.2
+    varied_path = tmp_path / "varied.yaml"
+    varied_path.write_text(yaml.safe_dump(data))
+    varied = run_matrix(load_config(varied_path), output_dir=tmp_path / "b")
+
+    assert any(a.transcript != b.transcript for a, b in zip(base, varied, strict=True))
+
+
 def test_rerun_is_deterministic(tmp_path):
     cfg = load_config(SMOKE_YAML)
     first = run_matrix(cfg, output_dir=tmp_path / "a")

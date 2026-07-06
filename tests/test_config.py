@@ -39,6 +39,7 @@ def test_smoke_config_loads_with_expected_values():
     assert cfg.models[0].model == "mock-agent"
     assert cfg.models[0].temperature == 0.0
     assert cfg.user_sim.effort_levels == ["passive", "moderate", "active_steering"]
+    assert cfg.user_sim.temperature == 0.7
     assert cfg.judge.rubric_version == "v0"
 
 
@@ -156,5 +157,12 @@ def test_whitespace_label_rejected(tmp_path):
 def test_negative_temperature_rejected(tmp_path):
     data = _smoke_dict()
     data["models"][0]["temperature"] = -0.5
+    with pytest.raises(ValidationError):
+        load_config(_write_yaml(tmp_path, data))
+
+
+def test_negative_user_sim_temperature_rejected(tmp_path):
+    data = _smoke_dict()
+    data["user_sim"]["temperature"] = -0.5
     with pytest.raises(ValidationError):
         load_config(_write_yaml(tmp_path, data))

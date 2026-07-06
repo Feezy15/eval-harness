@@ -55,6 +55,10 @@ class ModelConfig(_StrictModel):
 class UserSimConfig(_StrictModel):
     provider: str
     model: str
+    # One pinned value per run, not a matrix dimension: the sim is measurement
+    # apparatus, not treatment. It lives in config (not code) so it feeds the
+    # config hash — two runs with different sim sampling are different experiments.
+    temperature: float = Field(default=0.0, ge=0)
     effort_levels: list[EffortLevel] = Field(min_length=1)
 
     @field_validator("effort_levels")

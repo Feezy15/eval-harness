@@ -136,10 +136,7 @@ def run_matrix(config: Config, output_dir: str | Path | None = None) -> list[Epi
                             ModelConfig(
                                 provider=config.user_sim.provider,
                                 model=config.user_sim.model,
-                                # Pinned: the sim is measurement apparatus, not
-                                # treatment — effort level is the variable under
-                                # study (same rationale as the judge's fixed seed).
-                                temperature=0.7,
+                                temperature=config.user_sim.temperature,
                             ),
                             seed,
                         )
