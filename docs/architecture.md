@@ -103,12 +103,11 @@ which effort), not a second class hierarchy.
 
 - **Why:** the user simulator *is* an LLM playing a role. A parallel ABC would double the interface
   surface without adding a real axis of variation.
-- **Gaps:** the effort prompts are placeholders — operationalizing "effort" is the central
-  prompt-engineering task of M1 and will need iteration + a sensitivity check (a stretch goal). No
-  persona or hidden-preference state yet (needed for richer user types like `novice`/`adversarial`).
-  The prompts are also invisible to `config_hash`: a `prompts_version` stamp (cf. `rubric_version`)
-  must land together with the real prompts, or a later prompt edit silently changes the experiment
-  under an identical hash.
+- **Gaps:** the first real effort prompts are in (prompt files, decision 13); whether they produce
+  behaviorally distinct sims still needs a manipulation check against real models, and wording
+  sensitivity remains a stretch goal. No persona or hidden-preference state yet (needed for richer
+  user types like `novice`/`adversarial`). The visibility gap (prompt text invisible to
+  `config_hash`) is closed by the per-episode prompt-file fingerprint (decision 13).
 
 ### 3. The sim's goal lives in its system prompt; conversation history is role-flipped
 
@@ -143,9 +142,11 @@ collaboration has produced enough value" — the source paper's framing), and th
 
 - **Why:** an LLM user-sim can loop forever, so the cap bounds cost; and the stop probe is a real,
   costed API call — leaving it out of the records would understate per-episode cost.
-- **Gaps:** the substring sentinel check is crude (a sim that *mentions* the sentinel stops the
-  episode); structured output would be more robust. The mock sim never stops voluntarily, so smoke
-  runs always exercise the cap path (the sentinel path is covered by a stub in tests).
+- **Gaps:** sentinel matching is now bookend-based with wrapper stripping (one review round each
+  way: substring stopped on mere *mentions* of the sentinel; a bare bookend check then missed
+  wrapped signals like `Sounds great, <<DONE>>!`). Still heuristic and case-sensitive — structured
+  output would be more robust. The mock sim never stops voluntarily, so smoke runs always exercise
+  the cap path (the sentinel path is covered by stubs in tests).
 
 ### 6. Versioned rubric; transcripts are quoted data to the judge
 
@@ -248,6 +249,27 @@ read-only token. Originally planned for M3; pulled forward.
 - **Gaps:** no coverage reporting or concurrency cancellation; actions are tag-pinned, not
   SHA-pinned.
 
+### 13. Prompts are files; instrument identity is a content fingerprint
+
+Effort prompts and the judge rubric live as markdown files in `src/collab_eval/prompts/`, loaded
+at import. Every episode record and CSV row carries `prompts_hash`: sha256 over each prompt
+file's name and bytes, snapshotted once at import.
+
+- **Why:** the effort prompts *are* the experimental treatment, so their text is part of
+  experiment identity. A hand-bumped version string can drift from the text it claims to describe
+  (edit the prompt, forget the bump); a content hash cannot — think image tag vs. digest. The
+  fingerprint is snapshotted at import, the same moment consumers snapshot the prompt text:
+  recomputing from disk per episode would let a file edited mid-run stamp records with a hash
+  describing text no episode actually used (validated empirically during review). Filenames are
+  hashed alongside content because the same text in a different prompt slot is a different
+  instrument. The hash is measured, never passed in — a caller can't claim an identity other than
+  the one that ran.
+- **Gaps:** raw-byte hashing is line-ending sensitive (irrelevant on the Linux/CI/Docker target,
+  a caveat if that changes); `rubric_v1.md` requests an integer 0–10 while `JudgeScore.score` is
+  bounded to [0, 1] — the real judge must normalize (÷10) or its first construction raises
+  `ValidationError`; an empty prompt directory fingerprints as hash-of-nothing rather than failing
+  loud (guarded indirectly: the effort-prompt table fails at import if its files are missing).
+
 ## Testing strategy
 
 Tests were written red-first (each test file failed before its implementation existed):
@@ -259,6 +281,10 @@ Tests were written red-first (each test file failed before its implementation ex
   CSV shape, transcript alternation, turn cap, total-cost accounting (no untracked calls), replay
   determinism, early stop via a stub sim backend, temperature-variant identity separation, and
   config-driven sim temperature
+- `tests/test_prompts.py` — prompt loader fail-loud path, fingerprint determinism and
+  content/rename sensitivity, and the fingerprint's stamping into JSONL + CSV records
+- `tests/test_user_sim.py` — stop-sentinel semantics: bare and wrapped signals stop the episode,
+  mid-reply mentions do not
 
 Run with `uv run pytest` — no keys, no network.
 
