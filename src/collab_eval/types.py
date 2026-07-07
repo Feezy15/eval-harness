@@ -102,3 +102,7 @@ class EpisodeResult(BaseModel):
     judge: JudgeScore
     started_at: datetime
     config_hash: str
+    # Fingerprint of the prompt files (the instrument definition). Scores are
+    # only comparable under identical prompt text, and a content hash — unlike
+    # a hand-bumped version string — cannot drift from the text it describes.
+    prompts_hash: str

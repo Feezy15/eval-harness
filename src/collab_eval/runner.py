@@ -16,6 +16,7 @@ from pathlib import Path
 from collab_eval.config import Config, ModelConfig, load_config
 from collab_eval.judge import JUDGE_REGISTRY, Judge
 from collab_eval.models import MODEL_REGISTRY, AgentModel
+from collab_eval.prompts import PROMPTS_FINGERPRINT
 from collab_eval.tasks import TASK_REGISTRY, Task
 from collab_eval.types import EpisodeResult, Message, TurnRecord, Usage
 from collab_eval.user_sim import UserSimulator
@@ -108,6 +109,10 @@ def run_episode(
         judge=judge_score,
         started_at=started_at,
         config_hash=config_hash,
+        # Measured from the prompt files (at import, not per episode), never
+        # passed in: the caller can't claim an instrument identity other than
+        # the one that ran, and a mid-run file edit can't either.
+        prompts_hash=PROMPTS_FINGERPRINT,
     )
 
 
@@ -175,6 +180,7 @@ _CSV_COLUMNS = [
     "cost_usd",
     "latency_s",
     "config_hash",
+    "prompts_hash",
     "started_at",
 ]
 
@@ -198,6 +204,7 @@ def _episode_row(ep: EpisodeResult) -> dict[str, object]:
         "cost_usd": ep.totals.cost_usd,
         "latency_s": ep.totals.latency_s,
         "config_hash": ep.config_hash,
+        "prompts_hash": ep.prompts_hash,
         "started_at": ep.started_at.isoformat(),
     }
 

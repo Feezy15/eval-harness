@@ -6,35 +6,45 @@ AgentModel plus an effort-level prompt, so swapability comes from config
 """
 
 from collections.abc import Sequence
+from typing import get_args
 
 from pydantic import BaseModel
 
 from collab_eval.models.base import AgentModel
+from collab_eval.prompts import load_prompt
 from collab_eval.tasks.base import Task
 from collab_eval.types import EffortLevel, Message, Usage
 
 # The user-sim's model emits this to say "I have what I need; end the episode".
-# Checked via substring so models that add pleasantries around it still stop.
 STOP_SENTINEL = "<<DONE>>"
 
-# Placeholder effort prompts — enough to plumb the pipeline. Real prompt
-# engineering (the thing that operationalizes "effort") is its own work item
-# and deserves care + iteration, not a first draft buried in a scaffold.
+# The effort prompts ARE the experimental treatment — the text that
+# operationalizes "user involvement". It lives in prompt files (fingerprinted
+# into every episode record) so editing it can never silently change the
+# experiment under an unchanged identity.
 EFFORT_PROMPTS: dict[EffortLevel, str] = {
-    "passive": (
-        "You are a busy user. Give minimal, low-effort responses. Accept whatever "
-        "the assistant proposes unless something is clearly wrong."
-    ),
-    "moderate": (
-        "You are an engaged user. Answer the assistant's questions and point out "
-        "one thing per turn you'd like changed or clarified."
-    ),
-    "active_steering": (
-        "You are a highly involved user. Give specific corrections, add new "
-        "constraints as you think of them, and push the assistant toward exactly "
-        "what you want."
-    ),
+    level: load_prompt(f"effort_{level}") for level in get_args(EffortLevel)
 }
+
+
+# Characters models habitually wrap around a final token — closing punctuation,
+# quotes, markdown emphasis. Stripped from the reply's outer edges only, so a
+# genuine mid-reply mention still can't match the bookend check below.
+_WRAPPERS = " \t\r\n\"'*_`.,!?"
+
+
+def _signals_stop(content: str) -> bool:
+    """True when the sentinel is the reply or bookends it (modulo wrappers).
+
+    A mid-reply mention ("I'll say <<DONE>> once the budget is covered") is
+    conversation *about* stopping, not a stop signal — ending the episode on it
+    would truncate the collaboration and bias measured utility downward. But a
+    wrapped signal ("Sounds great, <<DONE>>!") is still a signal: missing it
+    runs unwanted extra turns and leaks the raw token into the judged
+    transcript, biasing the measurement the other way.
+    """
+    stripped = content.strip(_WRAPPERS)
+    return stripped.startswith(STOP_SENTINEL) or stripped.endswith(STOP_SENTINEL)
 
 
 class UserTurn(BaseModel):
@@ -85,7 +95,7 @@ class UserSimulator:
         ]
         response = self.model.next_turn(sim_conversation)
 
-        if STOP_SENTINEL in response.message.content:
+        if _signals_stop(response.message.content):
             return UserTurn(message=None, usage=response.usage)
         return UserTurn(
             message=Message(role="user", content=response.message.content),
