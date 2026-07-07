@@ -10,6 +10,7 @@ secrets.*
 
 # --- private agent ---
 CLAUDE.local.md
+docs/LEARNING_NOTES.local.md
 
 # --- results, caches, run artifacts ---
 results/
