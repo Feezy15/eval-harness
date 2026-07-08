@@ -12,6 +12,9 @@ Code quality, reproducibility, tests, and a clean README matter as much as resul
 ## Working style
 
 - **Teach through comments/PRs:** explain the "why" behind non-trivial ML/eval choices, not just the "what."
+- **Comment style — why, not what:** comments/docstrings state constraints and rationale the code can't
+  show; never narrate what the next line does. No decision/milestone-number citations in code — those
+  live in `docs/architecture.md` and go stale in source.
 - The maintainer owns architecture and design decisions; the assistant handles routine implementation.
 - Prefer LLM APIs over training anything.
 
