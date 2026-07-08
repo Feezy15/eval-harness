@@ -6,9 +6,11 @@ silently running a different experiment — config bugs are the cheapest bugs to
 catch and the most expensive to discover in a results plot.
 """
 
+import hashlib
 from collections import Counter
 from collections.abc import Sequence
 from pathlib import Path
+from typing import Literal
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -74,6 +76,20 @@ class JudgeConfig(_StrictModel):
     rubric_version: str
 
 
+class TelemetryConfig(_StrictModel):
+    """Observability knob, not an experiment knob — see `experiment_hash`.
+
+    Disabled by default so existing configs and CI stay exactly as they were
+    before this field existed (no telemetry block => this default applies).
+    """
+
+    enabled: bool = False
+    # "console" for local/manual inspection; "none" for keyless CI and tests
+    # that want real trace ids stamped without anything printing. OTLP/Jaeger
+    # export is a later, optional exporter — not implemented yet.
+    exporter: Literal["console", "none"] = "console"
+
+
 class Config(_StrictModel):
     run_name: str
     output_dir: Path
@@ -85,6 +101,7 @@ class Config(_StrictModel):
     models: list[ModelConfig] = Field(min_length=1)
     user_sim: UserSimConfig
     judge: JudgeConfig
+    telemetry: TelemetryConfig = Field(default_factory=TelemetryConfig)
 
     @field_validator("seeds")
     @classmethod
@@ -112,3 +129,18 @@ def load_config(path: str | Path) -> Config:
     with Path(path).open() as f:
         raw = yaml.safe_load(f)
     return Config.model_validate(raw)
+
+
+def experiment_hash(config: Config) -> str:
+    """Sha256 (first 12 hex chars) of the config, minus the `telemetry` block.
+
+    Stamped into every result record (as `config_hash`) so it can always be
+    traced back to the experiment definition that produced it.
+    Tracing is *operational*, not experiment-defining: a traced run and an
+    untraced run of the same matrix are the same experiment and must hash the
+    same, or turning on observability would silently split identical results
+    across two experiment identities. Excluding the block also keeps this
+    hash stable for configs written before `telemetry` existed — it dumps
+    identical JSON either way.
+    """
+    return hashlib.sha256(config.model_dump_json(exclude={"telemetry"}).encode()).hexdigest()[:12]

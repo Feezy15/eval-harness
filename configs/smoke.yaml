@@ -23,3 +23,6 @@ judge:
   provider: mock
   model: mock-judge
   rubric_version: v0
+
+telemetry:
+  enabled: false  # observability knob, not an experiment knob — excluded from config_hash; CI stays quiet

@@ -52,6 +52,7 @@ configs/*.yaml ──► Config (pydantic, strict)
 | `UserSimulator` | `src/collab_eval/user_sim.py` | Concrete class: any `AgentModel` + an effort-level prompt |
 | `Judge` / `MockJudge` | `src/collab_eval/judge.py` | Scores transcripts against a versioned rubric |
 | runner | `src/collab_eval/runner.py` | Matrix orchestration, episode loop, JSONL/CSV writers, CLI |
+| `telemetry` | `src/collab_eval/telemetry.py` | OTel tracer construction from config; span attribute-name constants |
 | registries | `tasks/__init__.py`, `models/__init__.py`, `judge.py` | Map config strings → classes; adding a task/model/judge = one module + one registry line |
 
 ## Episode lifecycle
@@ -73,13 +74,23 @@ Scaffold and plumbing (milestone M0), fully runnable with **no API keys and no n
   cells, and blank/colliding model labels all fail at load time
 - The complete episode loop and matrix runner, JSONL + CSV output
 - `MockModel` / `MockJudge` for deterministic zero-cost runs
-- 28 tests: config validation (incl. identity/duplicate rejection), mock determinism, end-to-end
-  matrix contract
 - Toolchain: uv + Python 3.12 (pinned), pytest, ruff, keyless GitHub Actions CI
 
+M1 in progress, landed so far:
+
+- Effort prompts and the judge rubric as fingerprinted instrument files (`prompts_hash` on every
+  record; decision 13)
+- An OTel span layer over the episode loop — `run` → `episode` → per-call spans — purely
+  observational; `config_hash` (computed by `config.experiment_hash()`) stays blind to telemetry
+  settings (decision 14)
+
+57 tests: config validation (incl. identity/duplicate rejection), mock determinism, end-to-end
+matrix contract, prompt fingerprinting, user-sim stop semantics, and the telemetry span layer's
+observational contract.
+
 Not yet built: real provider wrappers (OpenAI/Anthropic), real tasks (`trip_planning`,
-`csv_cleaning`), the LLM judge and its rubric, effort-prompt engineering, analysis/plots, response
-caching, Docker. See [PROJECT.md](PROJECT.md) milestones M1–M4.
+`csv_cleaning`), the LLM judge and its rubric, effort-prompt validation against real models,
+analysis/plots, response caching, Docker. See [PROJECT.md](PROJECT.md) milestones M1–M4.
 
 ## Key design decisions
 
@@ -270,6 +281,40 @@ file's name and bytes, snapshotted once at import.
   `ValidationError`; an empty prompt directory fingerprints as hash-of-nothing rather than failing
   loud (guarded indirectly: the effort-prompt table fails at import if its files are missing).
 
+### 14. Telemetry is an observational span layer; experiment identity is blind to it
+
+A `run` span (one per `run_matrix` call) parents an `episode` span per episode, which in turn
+parents `agent.turn` / `user_sim.turn` / `judge.score` spans for every logged LLM call — the same
+run → episode → call structure the JSONL already records, now also a trace that a standard
+OTel-compatible viewer can render. Every `EpisodeResult` carries `trace_id: str | None`, linking a
+JSONL row back to its trace when telemetry is on.
+
+- **Why:** spans are created at the orchestration site in `runner.py` only — `Task`, `AgentModel`,
+  and `Judge` implementations are untouched, so turning on observability can never change what's
+  being observed. Attributes follow GenAI semantic conventions for the call itself
+  (`gen_ai.request.model`, `gen_ai.usage.*`) and a `collab_eval.*` namespace for everything else
+  (episode id, effort, score, cost); message *content* never goes on a span — the JSONL stays the
+  analysis source of truth for transcripts, and the GenAI semconv treats content capture as
+  opt-in anyway. `telemetry.py` never calls `trace.set_tracer_provider`: OTel's global provider can
+  be set exactly once per process, so doing so here would leak whichever config ran first into
+  every other run or test sharing the process. Building a local `TracerProvider` per call and
+  handing its tracer out directly keeps runs (and tests) independent. Most load-bearing: the
+  `config_hash` field on every record keeps its name and meaning, but its computation moved from
+  an inline expression in the runner into `config.experiment_hash()`, which excludes the
+  `telemetry` block. Tracing is an *operational* setting, not an experiment-defining one — a
+  traced run and an untraced run of the identical matrix are the same experiment and must hash
+  the same, or turning on observability would silently split otherwise-identical results across
+  two experiment identities.
+- **Gaps:** only `console` (synchronous export, for local/manual inspection) and `none` (spans
+  record — so `trace_id` is real — but nothing is exported; the keyless-CI path) exist; OTLP/Jaeger
+  export is a later addition once there's a collector to send to. GenAI semantic conventions are
+  still an incubating upstream spec, so attribute names are pinned as constants in `telemetry.py`
+  rather than inlined at each call site, keeping a future rename a one-place fix. `trace_id` is
+  JSONL-only — the CSV's flat summary columns are deliberately unchanged (decision 7). The judge
+  span carries no `gen_ai.request.temperature`: `MockJudge` has no sampling temperature to report
+  (decision 11's gap — the judge's sampling params are still fixed in code) and will need the same
+  config treatment the real judge lands with.
+
 ## Testing strategy
 
 Tests were written red-first (each test file failed before its implementation existed):
@@ -285,6 +330,12 @@ Tests were written red-first (each test file failed before its implementation ex
   content/rename sensitivity, and the fingerprint's stamping into JSONL + CSV records
 - `tests/test_user_sim.py` — stop-sentinel semantics: bare and wrapped signals stop the episode,
   mid-reply mentions do not
+- `tests/test_telemetry.py` — the span layer's observational contract: `experiment_hash` blind to
+  telemetry settings, disabled telemetry changes nothing (byte-identical transcripts/scores/totals
+  traced vs. untraced), span-tree shape and parentage (`run` → `episode` → calls), episode- and
+  call-span attributes matching the logged records, `trace_id` linkage into JSONL, tracer
+  construction from config (no-op / console / recording-but-quiet), and the stop-probe span on a
+  standalone (traceless-root) episode
 
 Run with `uv run pytest` — no keys, no network.
 

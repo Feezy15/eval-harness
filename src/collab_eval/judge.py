@@ -18,6 +18,10 @@ from collab_eval.types import JudgeScore, Message
 
 class Judge(ABC):
     rubric_version: str
+    # Raw judge model string, mirroring AgentModel.model — span attribution
+    # (gen_ai.request.model on the judge.score span) needs the model actually
+    # called, not a harness label.
+    model: str
 
     @abstractmethod
     def score(self, task: Task, transcript: Sequence[Message]) -> JudgeScore:
@@ -38,6 +42,7 @@ def render_transcript(transcript: Sequence[Message]) -> str:
 class MockJudge(Judge):
     def __init__(self, model: str, rubric_version: str):
         self.rubric_version = rubric_version
+        self.model = model
         # Fixed seed: the judge is a measuring instrument — same rubric, same
         # behavior across every episode it scores.
         self._model = MockModel(model=model, seed=0)

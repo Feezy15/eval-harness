@@ -8,6 +8,8 @@ license = { text = "MIT" }
 # interpreter runs locally (via uv), in CI, and in Docker. Exact package versions live in uv.lock.
 requires-python = "==3.12.*"
 dependencies = [
+    "opentelemetry-api>=1.43.0",
+    "opentelemetry-sdk>=1.43.0",
     "pydantic>=2.7",
     "pyyaml>=6.0",
 ]

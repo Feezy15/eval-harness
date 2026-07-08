@@ -106,3 +106,6 @@ class EpisodeResult(BaseModel):
     # only comparable under identical prompt text, and a content hash — unlike
     # a hand-bumped version string — cannot drift from the text it describes.
     prompts_hash: str
+    # None when telemetry is off (a no-op span has no valid trace context).
+    # JSONL-only: the CSV summary columns are deliberately unchanged.
+    trace_id: str | None = None
