@@ -71,6 +71,14 @@ and produce slop that's hard to recover from.
 Generation is the fast part; verification is the rate-limiting part, and that's where the bugs hide. Treat it as the bulk of the work, not an afterthought.
 
 - **Tests first where practical (TDD):** Write the test file, **run** `pytest` **and confirm it red-bars**, then write the implementation to make it pass. Writing tests and implementation in the same batch (parallel writes, same message) does **not** satisfy this requirement; it skips the red bar, which is the only proof that the test is genuinely testing something and not accidentally passing against an already written implementation. New tests should fail, then pass incrementally (unit → integration → end-to-end; don't over-index on unit tests alone).
+- **Test economy — one behavior, one test:** before writing a test, search `tests/` for one that already
+  covers the behavior; **prefer extending or parametrizing an existing test over adding a new one.** Don't
+  add tests that re-cover the same behavior through a different entry point, and don't test the same logic
+  at multiple layers (if a unit test pins the logic, the integration test only needs to prove the wiring).
+  Delete tests made redundant by refactors instead of keeping both. New test *files* only for genuinely new
+  modules. TDD's red bar applies to modified tests too: the updated test must fail before the implementation
+  change. When in doubt whether a scenario deserves its own test, ask — half the value of the suite is that
+  it stays readable.
 - **Green gate before "done":** run `pytest` (on the mock model) plus lint/format (ruff/black) and type checks
 before considering any task complete.
 - **Generated code is a draft, not a commit.** Every atomic change gets reviewed; prove it works rather than
