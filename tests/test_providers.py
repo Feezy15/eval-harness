@@ -8,6 +8,7 @@ env key so the construction-time key check passes.
 
 import pytest
 
+from collab_eval.judge import JUDGE_REGISTRY
 from collab_eval.models import MODEL_REGISTRY
 from collab_eval.models.anthropic import AnthropicModel
 from collab_eval.models.openai import OpenAIModel
@@ -100,19 +101,33 @@ class _FakeAnthropicClient:
         self.messages = _FakeMessages(response)
 
 
-# --- OpenAIModel: construction guardrails -----------------------------------------
+# --- construction guardrails: missing key / never touches network, both providers -
 
 
-def test_openai_missing_api_key_raises_at_construction(monkeypatch):
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    with pytest.raises(Exception, match="OPENAI_API_KEY"):
-        OpenAIModel(model="gpt-5.4-mini", seed=0, temperature=0.0)
+_PROVIDER_CASES = {
+    "openai": (OpenAIModel, "OPENAI_API_KEY", {"model": "gpt-5.4-mini"}),
+    "anthropic": (
+        AnthropicModel,
+        "ANTHROPIC_API_KEY",
+        {"model": "claude-haiku-4-5", "max_tokens": 64},
+    ),
+}
 
 
-def test_openai_construction_never_touches_the_network(monkeypatch):
-    monkeypatch.setenv("OPENAI_API_KEY", "fake-key")
+@pytest.mark.parametrize("provider", ["openai", "anthropic"])
+def test_missing_api_key_raises_at_construction(monkeypatch, provider):
+    model_cls, env_var, extra_kwargs = _PROVIDER_CASES[provider]
+    monkeypatch.delenv(env_var, raising=False)
+    with pytest.raises(Exception, match=env_var):
+        model_cls(seed=0, temperature=0.0, **extra_kwargs)
+
+
+@pytest.mark.parametrize("provider", ["openai", "anthropic"])
+def test_construction_never_touches_the_network(monkeypatch, provider):
+    model_cls, env_var, extra_kwargs = _PROVIDER_CASES[provider]
+    monkeypatch.setenv(env_var, "fake-key")
     # If this reached the network it would hang/error in a sandboxed test run.
-    OpenAIModel(model="gpt-5.4-mini", seed=0, temperature=0.0)
+    model_cls(seed=0, temperature=0.0, **extra_kwargs)
 
 
 # --- OpenAIModel: request/response mapping ----------------------------------------
@@ -169,21 +184,10 @@ def test_openai_none_or_empty_content_raises(monkeypatch, content):
 # --- AnthropicModel: construction guardrails --------------------------------------
 
 
-def test_anthropic_missing_api_key_raises_at_construction(monkeypatch):
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    with pytest.raises(Exception, match="ANTHROPIC_API_KEY"):
-        AnthropicModel(model="claude-haiku-4-5", seed=0, temperature=0.0, max_tokens=64)
-
-
 def test_anthropic_missing_max_tokens_raises_at_construction(monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "fake-key")
     with pytest.raises(Exception, match="max_tokens"):
         AnthropicModel(model="claude-haiku-4-5", seed=0, temperature=0.0)
-
-
-def test_anthropic_construction_never_touches_the_network(monkeypatch):
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "fake-key")
-    AnthropicModel(model="claude-haiku-4-5", seed=0, temperature=0.0, max_tokens=64)
 
 
 # --- AnthropicModel: request/response mapping -------------------------------------
@@ -244,6 +248,18 @@ def test_anthropic_non_text_blocks_are_ignored_not_concatenated(monkeypatch):
 # --- registry ----------------------------------------------------------------------
 
 
-def test_openai_and_anthropic_registered():
+def test_openai_and_anthropic_registered(monkeypatch):
     assert MODEL_REGISTRY["openai"] is OpenAIModel
     assert MODEL_REGISTRY["anthropic"] is AnthropicModel
+
+    # Every registered model/judge exposes a non-empty raw model string: the
+    # GenAI semconv span attribute (gen_ai.request.model) names the model
+    # actually called, distinct from the harness's provider-qualified label.
+    monkeypatch.setenv("OPENAI_API_KEY", "fake-key")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "fake-key")
+    for model_cls in MODEL_REGISTRY.values():
+        agent = model_cls(model="m", seed=0, temperature=0.0, max_tokens=64)
+        assert isinstance(agent.model, str) and agent.model
+    for judge_cls in JUDGE_REGISTRY.values():
+        judge = judge_cls(model="m", rubric_version="v")
+        assert isinstance(judge.model, str) and judge.model

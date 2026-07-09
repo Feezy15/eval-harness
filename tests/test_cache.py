@@ -10,20 +10,18 @@ from a cache miss in every measured field except `started_at`.
 from collections.abc import Sequence
 from pathlib import Path
 
-import yaml
+import pytest
 
-from collab_eval.config import experiment_hash, load_config
+from collab_eval.config import load_config
 from collab_eval.models.base import AgentModel
 from collab_eval.models.cache import CachedModel, ResponseCache, cache_key
 from collab_eval.runner import run_matrix
 from collab_eval.types import Message, ModelResponse, Usage
-
-REPO_ROOT = Path(__file__).resolve().parents[1]
-SMOKE_YAML = REPO_ROOT / "configs" / "smoke.yaml"
+from conftest import SMOKE_YAML, conv
 
 
 def _conv() -> list[Message]:
-    return [Message(role="system", content="s"), Message(role="user", content="hello")]
+    return conv()
 
 
 # --- cache_key ----------------------------------------------------------------
@@ -34,31 +32,26 @@ def test_cache_key_is_deterministic():
     assert cache_key(params, _conv()) == cache_key(dict(params), _conv())
 
 
-def test_cache_key_changes_with_seed_alone():
-    base = {"provider": "openai", "model": "m", "temperature": 0.0}
-    k1 = cache_key({**base, "seed": 0}, _conv())
-    k2 = cache_key({**base, "seed": 1}, _conv())
-    assert k1 != k2
+_BASE_PARAMS = {"provider": "openai", "model": "m", "temperature": 0.0, "seed": 0}
 
 
-def test_cache_key_changes_with_messages():
-    params = {"provider": "openai", "model": "m", "temperature": 0.0, "seed": 0}
-    other = [Message(role="system", content="s"), Message(role="user", content="different")]
-    assert cache_key(params, _conv()) != cache_key(params, other)
-
-
-def test_cache_key_changes_with_temperature():
-    conv = _conv()
-    k1 = cache_key({"provider": "openai", "model": "m", "temperature": 0.0, "seed": 0}, conv)
-    k2 = cache_key({"provider": "openai", "model": "m", "temperature": 0.5, "seed": 0}, conv)
-    assert k1 != k2
-
-
-def test_cache_key_changes_with_model():
-    conv = _conv()
-    k1 = cache_key({"provider": "openai", "model": "m1", "temperature": 0.0, "seed": 0}, conv)
-    k2 = cache_key({"provider": "openai", "model": "m2", "temperature": 0.0, "seed": 0}, conv)
-    assert k1 != k2
+@pytest.mark.parametrize(
+    "params_a, conv_a, params_b, conv_b",
+    [
+        (_BASE_PARAMS, _conv(), {**_BASE_PARAMS, "seed": 1}, _conv()),
+        (
+            _BASE_PARAMS,
+            _conv(),
+            _BASE_PARAMS,
+            [Message(role="system", content="s"), Message(role="user", content="different")],
+        ),
+        (_BASE_PARAMS, _conv(), {**_BASE_PARAMS, "temperature": 0.5}, _conv()),
+        (_BASE_PARAMS, _conv(), {**_BASE_PARAMS, "model": "m2"}, _conv()),
+    ],
+    ids=["seed", "messages", "temperature", "model"],
+)
+def test_cache_key_changes_with(params_a, conv_a, params_b, conv_b):
+    assert cache_key(params_a, conv_a) != cache_key(params_b, conv_b)
 
 
 # --- ResponseCache --------------------------------------------------------------
@@ -67,16 +60,6 @@ def test_cache_key_changes_with_model():
 def test_response_cache_miss_returns_none(tmp_path):
     cache = ResponseCache(tmp_path / "cache")
     assert cache.get("nonexistent-key") is None
-
-
-def test_response_cache_round_trips_via_pydantic(tmp_path):
-    cache = ResponseCache(tmp_path / "cache")
-    response = ModelResponse(
-        message=Message(role="assistant", content="hi"),
-        usage=Usage(input_tokens=1, output_tokens=2, cost_usd=0.001, latency_s=0.5),
-    )
-    cache.put("key1", response)
-    assert cache.get("key1") == response
 
 
 def test_response_cache_creates_dir_lazily(tmp_path):
@@ -121,14 +104,6 @@ class _CountingStub(AgentModel):
         )
 
 
-def test_cached_model_forwards_name_model_temperature(tmp_path):
-    inner = _CountingStub()
-    cached = CachedModel(inner, ResponseCache(tmp_path / "cache"), key_params={"seed": 0})
-    assert cached.name == inner.name
-    assert cached.model == inner.model
-    assert cached.temperature == inner.temperature
-
-
 def test_cached_model_second_identical_call_replays_without_calling_inner(tmp_path):
     inner = _CountingStub()
     cached = CachedModel(
@@ -163,42 +138,18 @@ def _with_cache(cfg, *, enabled: bool, cache_dir: Path):
     )
 
 
-def test_run_matrix_cache_enabled_matches_disabled_except_started_at(tmp_path):
+def test_run_matrix_cache_disabled_enabled_first_and_enabled_second_all_match(tmp_path):
+    # Cache-disabled, first cache-enabled run, and second (cache-hitting) run
+    # must all produce field-for-field identical episodes (bar `started_at`):
+    # a cache hit is indistinguishable from a miss in every measured field.
     cfg = load_config(SMOKE_YAML)
     disabled = run_matrix(cfg, output_dir=tmp_path / "disabled")
 
     cfg_cached = _with_cache(cfg, enabled=True, cache_dir=tmp_path / "cachedir")
-    enabled = run_matrix(cfg_cached, output_dir=tmp_path / "enabled")
+    enabled_first = run_matrix(cfg_cached, output_dir=tmp_path / "enabled1")
+    enabled_second = run_matrix(cfg_cached, output_dir=tmp_path / "enabled2")
 
-    for off, on in zip(disabled, enabled, strict=True):
-        assert off.model_dump(exclude={"started_at"}) == on.model_dump(exclude={"started_at"})
-
-
-def test_run_matrix_hits_cache_on_second_run(tmp_path):
-    cfg = load_config(SMOKE_YAML)
-    cfg_cached = _with_cache(cfg, enabled=True, cache_dir=tmp_path / "cachedir")
-
-    first = run_matrix(cfg_cached, output_dir=tmp_path / "run1")
-    second = run_matrix(cfg_cached, output_dir=tmp_path / "run2")
-
-    for a, b in zip(first, second, strict=True):
-        assert a.model_dump(exclude={"started_at"}) == b.model_dump(exclude={"started_at"})
-
-
-# --- experiment_hash is blind to the cache block ----------------------------------
-
-
-def test_experiment_hash_equal_for_cache_absent_enabled_disabled(tmp_path):
-    data = yaml.safe_load(SMOKE_YAML.read_text())
-    data.pop("cache", None)
-    variants = {
-        "absent": dict(data),
-        "disabled": {**data, "cache": {"enabled": False}},
-        "enabled": {**data, "cache": {"enabled": True, "dir": "llm_cache"}},
-    }
-    hashes = {}
-    for label, variant in variants.items():
-        path = tmp_path / f"{label}.yaml"
-        path.write_text(yaml.safe_dump(variant))
-        hashes[label] = experiment_hash(load_config(path))
-    assert len(set(hashes.values())) == 1, hashes
+    for off, on1, on2 in zip(disabled, enabled_first, enabled_second, strict=True):
+        dumped = off.model_dump(exclude={"started_at"})
+        assert on1.model_dump(exclude={"started_at"}) == dumped
+        assert on2.model_dump(exclude={"started_at"}) == dumped

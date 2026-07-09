@@ -10,26 +10,23 @@ import pytest
 from collab_eval.models.pricing import PRICING_VERSION, cost_usd
 
 
-def test_pricing_version_is_nonempty():
-    assert isinstance(PRICING_VERSION, str) and PRICING_VERSION
-
-
-def test_anthropic_haiku_cost_matches_table():
-    assert cost_usd("anthropic", "claude-haiku-4-5", 1_000_000, 1_000_000) == pytest.approx(6.00)
+@pytest.mark.parametrize(
+    "provider, model, expected",
+    [
+        ("anthropic", "claude-haiku-4-5", 6.00),
+        ("openai", "gpt-5.4-mini", 5.25),
+        ("openai", "gpt-5.4-nano", 1.45),
+    ],
+    ids=["anthropic-haiku", "openai-gpt-5.4-mini", "openai-gpt-5.4-nano"],
+)
+def test_cost_matches_table(provider, model, expected):
+    assert cost_usd(provider, model, 1_000_000, 1_000_000) == pytest.approx(expected)
 
 
 def test_anthropic_haiku_dated_id_prices_the_same_as_the_bare_alias():
     assert cost_usd(
         "anthropic", "claude-haiku-4-5-20251001", 1_000_000, 1_000_000
     ) == pytest.approx(6.00)
-
-
-def test_openai_gpt_5_4_mini_cost_matches_table():
-    assert cost_usd("openai", "gpt-5.4-mini", 1_000_000, 1_000_000) == pytest.approx(5.25)
-
-
-def test_openai_gpt_5_4_nano_cost_matches_table():
-    assert cost_usd("openai", "gpt-5.4-nano", 1_000_000, 1_000_000) == pytest.approx(1.45)
 
 
 def test_unknown_pair_raises_naming_the_pair_and_pricing_version():

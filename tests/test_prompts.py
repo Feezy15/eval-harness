@@ -6,15 +6,11 @@ cannot. Every episode record carries the fingerprint.
 """
 
 import csv
-from pathlib import Path
 from typing import get_args
 
-from collab_eval.config import load_config
 from collab_eval.prompts import load_prompt, prompts_fingerprint
-from collab_eval.runner import run_matrix
 from collab_eval.types import EffortLevel
 
-SMOKE_YAML = Path(__file__).resolve().parents[1] / "configs" / "smoke.yaml"
 FINGERPRINT_HEX_LEN = 12
 
 
@@ -66,11 +62,10 @@ def test_effort_prompts_come_from_the_files():
         assert text == load_prompt(f"effort_{level}")
 
 
-def test_episode_records_carry_the_fingerprint(tmp_path):
-    results = run_matrix(load_config(SMOKE_YAML), output_dir=tmp_path)
+def test_episode_records_carry_the_fingerprint(smoke_run):
     fp = prompts_fingerprint()
-    assert all(ep.prompts_hash == fp for ep in results)
+    assert all(ep.prompts_hash == fp for ep in smoke_run.results)
 
-    with (tmp_path / "smoke.csv").open() as f:
+    with (smoke_run.output_dir / "smoke.csv").open() as f:
         rows = list(csv.DictReader(f))
     assert all(row["prompts_hash"] == fp for row in rows)
