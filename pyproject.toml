@@ -19,6 +19,7 @@ dependencies = [
 [dependency-groups]
 dev = [
     "pytest>=8.0",
+    "pytest-cov>=7.1.0",
     "ruff>=0.11",
 ]
 
@@ -32,6 +33,14 @@ packages = ["src/collab_eval"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+
+[tool.coverage.run]
+source = ["collab_eval"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
 
 [tool.ruff]
 target-version = "py312"

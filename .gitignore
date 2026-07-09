@@ -37,3 +37,8 @@ venv/
 Thumbs.db
 .idea/
 .vscode/
+
+# Coverage artifacts (pytest-cov)
+.coverage
+.coverage.*
+htmlcov/
