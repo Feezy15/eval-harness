@@ -38,6 +38,9 @@ class ModelConfig(_StrictModel):
     provider: str  # resolved against MODEL_REGISTRY at runner build time
     model: str
     temperature: float = Field(default=0.0, ge=0)  # providers enforce their own upper bounds
+    # Unset by default (mock and OpenAI tolerate that); Anthropic requires it
+    # and fails loud at construction if it's still None for that provider.
+    max_tokens: int | None = Field(default=None, ge=1)
     # This entry's identity in episode ids, result rows, and plots. Entries that
     # share a provider+model (e.g. a temperature ablation) need explicit distinct
     # labels, or their results would be indistinguishable downstream.
@@ -61,6 +64,9 @@ class UserSimConfig(_StrictModel):
     # apparatus, not treatment. It lives in config (not code) so it feeds the
     # config hash — two runs with different sim sampling are different experiments.
     temperature: float = Field(default=0.0, ge=0)
+    # Threaded into the ModelConfig the runner builds for the sim's backing
+    # model -- an Anthropic-backed sim needs this set, same as any agent model.
+    max_tokens: int | None = Field(default=None, ge=1)
     effort_levels: list[EffortLevel] = Field(min_length=1)
 
     @field_validator("effort_levels")
@@ -90,6 +96,18 @@ class TelemetryConfig(_StrictModel):
     exporter: Literal["console", "none"] = "console"
 
 
+class CacheConfig(_StrictModel):
+    """Disk cache for real LLM responses, keyed on full request identity.
+
+    Enabled by default: real spend should be cached unless explicitly opted
+    out (repo guardrail) — configs that want zero filesystem footprint (e.g.
+    the mock-model smoke config) turn it off explicitly instead.
+    """
+
+    enabled: bool = True
+    dir: str = "llm_cache"
+
+
 class Config(_StrictModel):
     run_name: str
     output_dir: Path
@@ -102,6 +120,7 @@ class Config(_StrictModel):
     user_sim: UserSimConfig
     judge: JudgeConfig
     telemetry: TelemetryConfig = Field(default_factory=TelemetryConfig)
+    cache: CacheConfig = Field(default_factory=CacheConfig)
 
     @field_validator("seeds")
     @classmethod
@@ -132,15 +151,21 @@ def load_config(path: str | Path) -> Config:
 
 
 def experiment_hash(config: Config) -> str:
-    """Sha256 (first 12 hex chars) of the config, minus the `telemetry` block.
+    """Sha256 (first 12 hex chars) of the config, minus the `telemetry` and
+    `cache` blocks.
 
     Stamped into every result record (as `config_hash`) so it can always be
     traced back to the experiment definition that produced it.
-    Tracing is *operational*, not experiment-defining: a traced run and an
-    untraced run of the same matrix are the same experiment and must hash the
-    same, or turning on observability would silently split identical results
-    across two experiment identities. Excluding the block also keeps this
-    hash stable for configs written before `telemetry` existed — it dumps
-    identical JSON either way.
+    Both excluded blocks are *operational*, not experiment-defining: a traced
+    or cached run and an untraced/uncached run of the same matrix are the same
+    experiment and must hash the same, or turning on observability/caching
+    would silently split identical results across two experiment identities.
+    The cache key already covers the full request identity (including seed),
+    so a hit can only ever replay what the identical experiment call produced
+    earlier -- caching is a rerun-cost optimization, not a new experiment.
+    Excluding both blocks also keeps this hash stable for configs written
+    before they existed — they dump identical JSON either way.
     """
-    return hashlib.sha256(config.model_dump_json(exclude={"telemetry"}).encode()).hexdigest()[:12]
+    return hashlib.sha256(
+        config.model_dump_json(exclude={"telemetry", "cache"}).encode()
+    ).hexdigest()[:12]

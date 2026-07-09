@@ -166,3 +166,60 @@ def test_negative_user_sim_temperature_rejected(tmp_path):
     data["user_sim"]["temperature"] = -0.5
     with pytest.raises(ValidationError):
         load_config(_write_yaml(tmp_path, data))
+
+
+# --- cache config ---------------------------------------------------------------
+
+
+def test_cache_defaults_enabled_with_default_dir():
+    cfg = load_config(SMOKE_YAML)
+    # smoke.yaml explicitly opts out (mock model, zero cost, CI filesystem-clean).
+    assert cfg.cache.enabled is False
+    assert cfg.cache.dir == "llm_cache"
+
+
+def test_cache_defaults_when_block_omitted(tmp_path):
+    data = _smoke_dict()
+    data.pop("cache", None)
+    cfg = load_config(_write_yaml(tmp_path, data))
+    assert cfg.cache.enabled is True
+    assert cfg.cache.dir == "llm_cache"
+
+
+def test_cache_unknown_key_rejected(tmp_path):
+    data = _smoke_dict()
+    data["cache"] = {"enabled": True, "diir": "x"}
+    with pytest.raises(ValidationError):
+        load_config(_write_yaml(tmp_path, data))
+
+
+# --- max_tokens ---------------------------------------------------------------
+
+
+def test_model_max_tokens_defaults_to_none():
+    cfg = load_config(SMOKE_YAML)
+    assert cfg.models[0].max_tokens is None
+    assert cfg.user_sim.max_tokens is None
+
+
+def test_model_max_tokens_can_be_set(tmp_path):
+    data = _smoke_dict()
+    data["models"][0]["max_tokens"] = 512
+    data["user_sim"]["max_tokens"] = 256
+    cfg = load_config(_write_yaml(tmp_path, data))
+    assert cfg.models[0].max_tokens == 512
+    assert cfg.user_sim.max_tokens == 256
+
+
+def test_model_max_tokens_below_one_rejected(tmp_path):
+    data = _smoke_dict()
+    data["models"][0]["max_tokens"] = 0
+    with pytest.raises(ValidationError):
+        load_config(_write_yaml(tmp_path, data))
+
+
+def test_user_sim_max_tokens_below_one_rejected(tmp_path):
+    data = _smoke_dict()
+    data["user_sim"]["max_tokens"] = 0
+    with pytest.raises(ValidationError):
+        load_config(_write_yaml(tmp_path, data))

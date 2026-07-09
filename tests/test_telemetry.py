@@ -300,9 +300,11 @@ def test_tracer_from_config_console_exporter_prints_spans(capfd):
 # --- the registry-wide raw-model-name contract ---
 
 
-def test_every_registered_model_and_judge_exposes_its_raw_model_name():
+def test_every_registered_model_and_judge_exposes_its_raw_model_name(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "fake-key")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "fake-key")
     for model_cls in MODEL_REGISTRY.values():
-        agent = model_cls(model="m", seed=0, temperature=0.0)
+        agent = model_cls(model="m", seed=0, temperature=0.0, max_tokens=64)
         assert isinstance(agent.model, str) and agent.model
     for judge_cls in JUDGE_REGISTRY.values():
         judge = judge_cls(model="m", rubric_version="v")

@@ -20,7 +20,9 @@ _CHARS_PER_TOKEN = 4  # crude but standard heuristic for synthetic token counts
 
 
 class MockModel(AgentModel):
-    def __init__(self, model: str, seed: int, temperature: float = 0.0):
+    def __init__(
+        self, model: str, seed: int, temperature: float = 0.0, max_tokens: int | None = None
+    ):
         self.model = model
         self.seed = seed
         self.temperature = temperature

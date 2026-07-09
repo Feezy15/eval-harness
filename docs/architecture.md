@@ -49,6 +49,9 @@ configs/*.yaml ──► Config (pydantic, strict)
 | `ToyTask` | `src/collab_eval/tasks/toy.py` | Deterministic stub task for smoke runs and CI |
 | `AgentModel` | `src/collab_eval/models/base.py` | The one LLM abstraction: `next_turn(conversation) -> ModelResponse` |
 | `MockModel` | `src/collab_eval/models/mock.py` | Deterministic, zero-cost, synthetic-usage implementation |
+| `OpenAIModel` / `AnthropicModel` | `src/collab_eval/models/openai.py`, `anthropic.py` | Real providers behind the same interface; keys from env, fail loud at construction |
+| pricing | `src/collab_eval/models/pricing.py` | Snapshot-dated $/1M-token table; unknown models fail loud; `pricing_version` on every record |
+| `CachedModel` / `ResponseCache` | `src/collab_eval/models/cache.py` | Disk response cache as a composition wrapper; hits replay stored usage verbatim |
 | `UserSimulator` | `src/collab_eval/user_sim.py` | Concrete class: any `AgentModel` + an effort-level prompt |
 | `Judge` / `MockJudge` | `src/collab_eval/judge.py` | Scores transcripts against a versioned rubric |
 | runner | `src/collab_eval/runner.py` | Matrix orchestration, episode loop, JSONL/CSV writers, CLI |
@@ -83,14 +86,17 @@ M1 in progress, landed so far:
 - An OTel span layer over the episode loop — `run` → `episode` → per-call spans — purely
   observational; `config_hash` (computed by `config.experiment_hash()`) stays blind to telemetry
   settings (decision 14)
+- OpenAI + Anthropic wrappers behind the unchanged `AgentModel` interface, a snapshot-dated
+  pricing table (`pricing_version` on every record), and a disk response cache as a composition
+  wrapper — cache and telemetry both excluded from experiment identity (decision 15)
 
-57 tests: config validation (incl. identity/duplicate rejection), mock determinism, end-to-end
-matrix contract, prompt fingerprinting, user-sim stop semantics, and the telemetry span layer's
-observational contract.
+100 tests: config validation (incl. identity/duplicate rejection), mock determinism, end-to-end
+matrix contract, prompt fingerprinting, user-sim stop semantics, the telemetry span layer's
+observational contract, pricing math, cache invariance, and stubbed-SDK provider mapping.
 
-Not yet built: real provider wrappers (OpenAI/Anthropic), real tasks (`trip_planning`,
-`csv_cleaning`), the LLM judge and its rubric, effort-prompt validation against real models,
-analysis/plots, response caching, Docker. See [PROJECT.md](PROJECT.md) milestones M1–M4.
+Not yet built: real tasks (`trip_planning`, `csv_cleaning`), the LLM judge and its rubric,
+effort-prompt validation against real models, analysis/plots, Docker. See
+[PROJECT.md](PROJECT.md) milestones M1–M4.
 
 ## Key design decisions
 
@@ -315,6 +321,44 @@ JSONL row back to its trace when telemetry is on.
   (decision 11's gap — the judge's sampling params are still fixed in code) and will need the same
   config treatment the real judge lands with.
 
+### 15. Real providers behind the same interface; pricing is versioned data; the cache replays measurements
+
+OpenAI and Anthropic land as two more `AgentModel` implementations with the uniform registry
+constructor `(model, seed, temperature, max_tokens=None)` — the episode loop cannot tell a paid
+model from the mock. Alongside them: a snapshot-dated pricing table (`models/pricing.py`) and a
+disk response cache (`models/cache.py`) applied by *composition* — `CachedModel` wraps any
+`AgentModel` at build time rather than each provider reimplementing lookup/store.
+
+- **Why:** provider APIs return token counts but not dollars — cost is **derived** data, so the
+  derivation must be versioned (`PRICING_VERSION`, stamped on every record like `config_hash` and
+  `prompts_hash`) or costs from two runs can't be honestly compared. An unknown (provider, model)
+  pair fails loud instead of pricing at $0: a silent zero would defeat the spend cap and quietly
+  flatten cost curves. The cache key is the full request identity from *config* (provider, model,
+  temperature, max_tokens, seed) plus the message list; seed is load-bearing because remote APIs
+  can't truly seed sampling — without it, replicate cells with identical message prefixes would
+  collide in cache and collapse into a single sample, silently destroying the spread the seeds
+  exist to measure. A hit replays the stored `ModelResponse` verbatim **including its original
+  usage** (tokens, cost, latency): the cache exists to avoid re-spending, not to change
+  measurements — if hits reported near-zero latency or cost, the cost/latency-vs-utility analysis
+  would depend on operational history instead of the experiment. For the same reason
+  `experiment_hash` excludes the `cache` block alongside `telemetry` (decision 14's principle,
+  second application): the cache can only replay what the identical experiment call produced, so
+  cached and fresh runs are the same experiment. Retries stay at the SDK defaults (both clients
+  retry transient failures) with no custom retry layer — deliberate, because the cache already
+  provides crash-resume semantics: rerunning a partially-failed matrix replays completed calls for
+  free and pays only for the remainder. API keys come from env at wrapper construction and fail
+  loud *before* the matrix starts, never mid-run and never logged. Anthropic's API requires
+  `max_tokens`, so `ModelConfig` grew an optional field the Anthropic wrapper demands at
+  construction — which changed every config's serialized form and therefore every `config_hash`:
+  correct, since the experiment-definition space itself grew.
+- **Gaps:** the judge is not yet cache-wrapped (`JUDGE_REGISTRY` is mock-only today; the real LLM
+  judge must thread the cache through when it lands, or judge calls ship uncached).
+  `ResponseCache.put` is not atomic — a process killed mid-write leaves a truncated file that
+  fails loud (`ValidationError`) on the next read rather than silently corrupting results;
+  temp-file+rename is a cheap later hardening. The pricing table is a single dated snapshot: no
+  per-date ranges, and prompt-caching/batch discounts aren't modeled, so recorded costs are
+  list-price upper bounds.
+
 ## Testing strategy
 
 Tests were written red-first (each test file failed before its implementation existed):
@@ -336,6 +380,14 @@ Tests were written red-first (each test file failed before its implementation ex
   call-span attributes matching the logged records, `trace_id` linkage into JSONL, tracer
   construction from config (no-op / console / recording-but-quiet), and the stop-probe span on a
   standalone (traceless-root) episode
+- `tests/test_pricing.py` — cost math against the table; unknown (provider, model) fails loud
+- `tests/test_cache.py` — key determinism and sensitivity (seed, messages, temperature, model),
+  disk round-trip, wrapper delegation (a hit skips the inner model and replays usage verbatim),
+  matrix-level cache invariance (enabled vs. disabled results identical; second run hits), and
+  `experiment_hash` blind to the cache block
+- `tests/test_providers.py` — stubbed SDK clients, zero network: request mapping (params, system
+  extraction for Anthropic), usage mapping, content-extraction edge cases, and fail-loud paths
+  (missing env key, missing `max_tokens`, empty content)
 
 Run with `uv run pytest` — no keys, no network.
 
@@ -344,5 +396,7 @@ Run with `uv run pytest` — no keys, no network.
 - **New task:** implement `Task`'s three methods in one module, register in
   `tasks/__init__.py:TASK_REGISTRY`, reference by name in config.
 - **New model provider:** implement `AgentModel.next_turn` with constructor
-  `(model, seed, temperature)`, register in `models/__init__.py:MODEL_REGISTRY`.
+  `(model, seed, temperature, max_tokens=None)`, register in
+  `models/__init__.py:MODEL_REGISTRY`, and add the model's rates to `models/pricing.py`
+  (unknown models fail loud at call time).
 - **New judge:** implement `Judge.score`, register in `judge.py:JUDGE_REGISTRY`.

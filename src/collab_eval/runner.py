@@ -19,6 +19,8 @@ from collab_eval import telemetry
 from collab_eval.config import Config, ModelConfig, experiment_hash, load_config
 from collab_eval.judge import JUDGE_REGISTRY, Judge
 from collab_eval.models import MODEL_REGISTRY, AgentModel
+from collab_eval.models.cache import CachedModel, ResponseCache
+from collab_eval.models.pricing import PRICING_VERSION
 from collab_eval.prompts import PROMPTS_FINGERPRINT
 from collab_eval.tasks import TASK_REGISTRY, Task
 from collab_eval.telemetry import build_tracer
@@ -34,9 +36,26 @@ def _lookup[T](registry: Mapping[str, T], key: str, kind: str) -> T:
         raise ValueError(f"Unknown {kind} {key!r}; available: {sorted(registry)}") from None
 
 
-def _build_model(cfg: ModelConfig, seed: int) -> AgentModel:
+def _build_model(cfg: ModelConfig, seed: int, cache: ResponseCache | None = None) -> AgentModel:
     cls = _lookup(MODEL_REGISTRY, cfg.provider, "model provider")
-    return cls(model=cfg.model, seed=seed, temperature=cfg.temperature)
+    model = cls(model=cfg.model, seed=seed, temperature=cfg.temperature, max_tokens=cfg.max_tokens)
+    if cache is None:
+        return model
+    # Key params come straight from config, not sniffed off the built model:
+    # the config is the request identity we vouch for. Seed is included even
+    # though remote APIs can't truly seed sampling — without it, replicate
+    # cells with identical message prefixes would collide into one sample.
+    return CachedModel(
+        model,
+        cache,
+        key_params={
+            "provider": cfg.provider,
+            "model": cfg.model,
+            "temperature": cfg.temperature,
+            "max_tokens": cfg.max_tokens,
+            "seed": seed,
+        },
+    )
 
 
 def run_episode(
@@ -202,6 +221,9 @@ def run_episode(
         # passed in: the caller can't claim an instrument identity other than
         # the one that ran, and a mid-run file edit can't either.
         prompts_hash=PROMPTS_FINGERPRINT,
+        # Same principle as prompts_hash: the pricing snapshot is a property of
+        # the code that ran, so it's stamped here, not passed in by the caller.
+        pricing_version=PRICING_VERSION,
         trace_id=trace_id,
     )
 
@@ -224,6 +246,8 @@ def run_matrix(
     judge_cls = _lookup(JUDGE_REGISTRY, config.judge.provider, "judge provider")
     judge = judge_cls(model=config.judge.model, rubric_version=config.judge.rubric_version)
 
+    cache = ResponseCache(config.cache.dir) if config.cache.enabled else None
+
     # Only build (and later shut down) a provider we own; an injected tracer
     # belongs to its caller.
     provider = None
@@ -244,14 +268,16 @@ def run_matrix(
                     for model_cfg in config.models:
                         for effort in config.user_sim.effort_levels:
                             for seed in config.seeds:
-                                agent = _build_model(model_cfg, seed)
+                                agent = _build_model(model_cfg, seed, cache=cache)
                                 sim_model = _build_model(
                                     ModelConfig(
                                         provider=config.user_sim.provider,
                                         model=config.user_sim.model,
                                         temperature=config.user_sim.temperature,
+                                        max_tokens=config.user_sim.max_tokens,
                                     ),
                                     seed,
+                                    cache=cache,
                                 )
                                 episode = run_episode(
                                     task,
@@ -297,6 +323,7 @@ _CSV_COLUMNS = [
     "latency_s",
     "config_hash",
     "prompts_hash",
+    "pricing_version",
     "started_at",
 ]
 
@@ -321,6 +348,7 @@ def _episode_row(ep: EpisodeResult) -> dict[str, object]:
         "latency_s": ep.totals.latency_s,
         "config_hash": ep.config_hash,
         "prompts_hash": ep.prompts_hash,
+        "pricing_version": ep.pricing_version,
         "started_at": ep.started_at.isoformat(),
     }
 

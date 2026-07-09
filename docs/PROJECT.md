@@ -102,13 +102,15 @@ Repo skeleton, config loading, interfaces defined, a **mock model** so the loop 
 ### 🔜 M1 — MVP (reproduce the core idea)
 1 real task (`trip_planning`), 2 models, 3 effort levels, LLM-as-judge rubric; produce the **utility-vs-effort** plot.
 - **DoD:** a plot showing utility rising with involvement, and a note on where agents plateau/underperform.
-- **Status (2026-07-08, in progress on `m1-mvp`):** chunk 1 (prompt files + content fingerprint,
-  bookend stop-sentinel) and chunk 2 (OTel span layer over run → episode → turn/LLM-call; GenAI
-  semconv; JSONL stays the analysis source of truth; `experiment_hash` blind to telemetry — see
-  `docs/architecture.md` decision 14) are done; 59 tests green. Remaining chunks: (3) OpenAI +
-  Anthropic wrappers with versioned pricing + disk response cache, (4) `trip_planning` +
-  seeded `Task.user_context` for the sim (with canary leak tests), (5) real LLM judge with fenced
-  transcripts, (6) `analysis.py` + the DoD plot, (7) `experiment.yaml` + the real run.
+- **Status (2026-07-09, in progress on `m1-mvp`):** chunk 1 (prompt files + content fingerprint,
+  bookend stop-sentinel), chunk 2 (OTel span layer over run → episode → turn/LLM-call; GenAI
+  semconv; JSONL stays the analysis source of truth; `experiment_hash` blind to telemetry —
+  decision 14), and chunk 3 (OpenAI + Anthropic wrappers, snapshot-dated pricing table with
+  fail-loud unknown models, disk response cache as a composition wrapper excluded from experiment
+  identity — decision 15) are done; 100 tests green. Remaining chunks: (4) `trip_planning` +
+  seeded `Task.user_context` for the sim (with canary leak tests; wire the cache through the
+  judge when the LLM judge lands), (5) real LLM judge with fenced transcripts, (6) `analysis.py`
+  + the DoD plot, (7) `experiment.yaml` + the real run.
 
 ### ⬜ M2 — The extension (cost/latency-vs-utility)
 Add token/cost/latency logging and render **utility-per-dollar** and **utility-per-second** curves; add a 2nd
