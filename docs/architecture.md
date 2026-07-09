@@ -359,6 +359,24 @@ disk response cache (`models/cache.py`) applied by *composition* — `CachedMode
   per-date ranges, and prompt-caching/batch discounts aren't modeled, so recorded costs are
   list-price upper bounds.
 
+### 16. Test economy: one behavior, one test; coverage is a report, not a gate
+
+The suite follows CLAUDE.md's test-economy rule: near-duplicate cases are `parametrize`d, the same
+logic isn't pinned at multiple layers, and shared scaffolding lives in `tests/conftest.py` —
+including a session-scoped `smoke_run` fixture (and a module-scoped traced sibling in
+`test_telemetry.py`) that runs the smoke matrix once for every test that only *reads* the result.
+CI reports branch coverage (`pytest --cov`, term-missing) with no `--cov-fail-under`.
+
+- **Why:** the suite was growing by copy-paste — 5 files re-declared the same constants/stubs and 21
+  test call sites each executed the full smoke matrix; consolidation cut ~1/3 of test functions with
+  a coverage-equivalence guard (97% total before and after, no per-module drop), which is the proof
+  the deleted tests were redundant rather than load-bearing. Coverage is report-only because a
+  numeric gate invites padding tests to clear a threshold — the opposite of test economy; the tests
+  themselves gate.
+- **Gaps:** the shared fixtures are a read-only contract enforced by docstring, not by code — a test
+  that mutates `smoke_run.results` would poison later tests in subtle ways (frozen dataclass guards
+  the top level only). Coverage regressions rely on a human noticing the CI table.
+
 ## Testing strategy
 
 Tests were written red-first (each test file failed before its implementation existed):
