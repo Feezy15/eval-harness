@@ -89,13 +89,20 @@ M1 in progress, landed so far:
 - OpenAI + Anthropic wrappers behind the unchanged `AgentModel` interface, a snapshot-dated
   pricing table (`pricing_version` on every record), and a disk response cache as a composition
   wrapper — cache and telemetry both excluded from experiment identity (decision 15)
+- The `trip_planning` task with seeded scenarios and isolated context channels (`user_context`
+  sim-only, `judge_context`/`judge_criteria` judge-only; decision 17)
+- The real `LLMJudge`: deterministic per-scenario checklist, CoT-before-verdict, met-fraction
+  computed in code, scoring a consolidation turn appended after the loop (decision 18)
+- `analysis.py`: the utility-vs-effort figure from a results JSONL — mean line per model,
+  individual seed scores as dots (decision 19)
 
-100 tests: config validation (incl. identity/duplicate rejection), mock determinism, end-to-end
-matrix contract, prompt fingerprinting, user-sim stop semantics, the telemetry span layer's
-observational contract, pricing math, cache invariance, and stubbed-SDK provider mapping.
+123 tests: config validation (incl. identity/duplicate rejection), mock determinism, end-to-end
+matrix contract, prompt fingerprinting, user-sim stop semantics, channel isolation, the telemetry
+span layer's observational contract, pricing math, cache invariance, stubbed-SDK provider mapping,
+judge parsing/scoring, and analysis aggregation + rendering.
 
-Not yet built: real tasks (`trip_planning`, `csv_cleaning`), the LLM judge and its rubric,
-effort-prompt validation against real models, analysis/plots, Docker. See
+Not yet built: the real-model run (`experiment.yaml`) with its manipulation check and golden-set
+judge validation, the second task (`csv_cleaning`), cost/latency-vs-utility plots, Docker. See
 [PROJECT.md](PROJECT.md) milestones M1–M4.
 
 ## Key design decisions
@@ -451,6 +458,35 @@ in-loop message happened to be.
   real model calls to be meaningful. Judge-model sensitivity (does score depend on which model
   judges?) is unstudied, parked with the cross-family ensemble idea in PROJECT.md §6.
 
+### 19. Analysis plots raw replicates, not error bars
+
+`analysis.py` closes the loop: `--results <run>.jsonl` → per-cell aggregation → the
+utility-vs-effort figure (`<run>_utility_vs_effort.png`, one subplot per task, one line per model
+through the mean score at each effort level, every individual seed's score as a faint dot beside
+it).
+
+- **Why the JSONL, not the CSV:** the CSV is a derived convenience export (decision 7). Analysis
+  parses JSONL lines back into `EpisodeResult`, so it gets typed, validated access to exactly what
+  the runner recorded — a schema change breaks loudly at parse time instead of silently shifting
+  CSV columns.
+- **Why seed dots instead of error bars:** at N=2–5 seeds, a mean ± std bar is an estimate of a
+  distribution the sample can't support — std over two points is just their half-distance dressed
+  up as statistics, and the bar visually claims a rigor the data doesn't have. Plotting each
+  replicate shows precisely what was measured and lets the reader judge spread directly; it's the
+  honest convention for small-N ML evals. Error bars become defensible only if the seed count
+  grows past the point where dots clutter.
+- **Why effort is an ordered categorical:** `passive → moderate → active_steering` is the
+  treatment ordering of the independent variable, taken from `typing.get_args(EffortLevel)` so the
+  axis order has one source of truth; alphabetical sorting would silently reorder the x-axis and
+  make every curve unreadable.
+- **Why a fixed four-slot palette that fails loud:** colors come from a validated categorical
+  palette (contrast- and CVD-checked, assigned by first appearance, never cycled); a fifth model
+  raises instead of inventing an unvalidated hue. Line-end direct labels back up the two slots
+  that sit below 3:1 contrast on white.
+- **Gaps:** utility-only — cost/latency-vs-utility curves are the next milestone; the figure
+  assumes one run per file (multi-run comparison would need a run/config dimension); no
+  significance testing, deliberately (nothing honest to compute at this N).
+
 ## Testing strategy
 
 Tests were written red-first (each test file failed before its implementation existed):
@@ -491,6 +527,9 @@ Tests were written red-first (each test file failed before its implementation ex
   tolerance, fail-loud parsing (not-JSON, wrong criteria count, empty reasoning, non-boolean
   verdict); `build_judge` resolving mock vs. a registered provider, and cache wrapping of the
   backing model when enabled
+- `tests/test_analysis.py` — aggregation correctness (per-cell means, treatment-order effort axis,
+  no phantom cells) and the end-to-end chain on real smoke output (JSONL round-trip, figure
+  renders)
 
 Run with `uv run pytest` — no keys, no network.
 
@@ -506,3 +545,6 @@ Run with `uv run pytest` — no keys, no network.
 - **New judge:** implement `Judge.score`; `build_judge` (`judge.py`) resolves `provider: mock` to
   `MockJudge` and everything else to `LLMJudge` over `MODEL_REGISTRY` — a new non-mock judge
   implementation is a `build_judge` branch, not a new registry.
+- **New plot:** `analysis.py` separates loading (`load_results`), aggregation (`utility_by_effort`,
+  a tidy DataFrame), and rendering (`plot_utility_vs_effort`) — a new curve is a new
+  aggregate + render pair over the same loaded episodes.

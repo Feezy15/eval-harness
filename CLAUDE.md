@@ -115,12 +115,13 @@ config), episode loop + matrix runner (agent temperature recorded per episode), 
 keyless CI (pulled forward from M3). Design decisions + gaps: `docs/architecture.md` (see 10–12 for
 the review-hardening round).
 
-**M1 in progress on `m1-mvp`** (chunks 1-5 of 7 done; see `docs/PROJECT.md` for the chunk list and
-`docs/architecture.md` decisions 14-18). Chunk 5 landed the real `LLMJudge`: a deterministic
-per-task checklist (`Task.judge_criteria`) scored via CoT-then-verdict JSON, met-fraction computed
-in code; a consolidation turn after the agent/user-sim loop (stop or cap) elicits one restated
-final artifact so the judge never scores an arbitrary last turn; `build_judge` resolves
-`JudgeConfig` to `MockJudge` or a cache-wrapped `LLMJudge`. 120 tests green.
+**M1 in progress on `m1-mvp`** (chunks 1-6 of 7 done; see `docs/PROJECT.md` for the chunk list and
+`docs/architecture.md` decisions 14-19). Chunk 6 landed `analysis.py`: loads the results JSONL
+(source of truth), aggregates `judge.score` per (task, model, effort) with effort in treatment
+order, and renders the utility-vs-effort figure (subplot per task, mean line per model, individual
+seed scores as faint dots — raw replicates, not error bars, at this N). CLI:
+`uv run python -m collab_eval.analysis --results results/<run>.jsonl`; CI runs it on smoke output
+after the smoke step. pandas + matplotlib added. 123 tests green.
 
-**Next:** chunk 6 (`analysis.py` + the utility-vs-effort plot), chunk 7 (`experiment.yaml` real run,
-manipulation check, golden-set judge validation). See `docs/PROJECT.md` for M0-M4.
+**Next:** chunk 7 (`experiment.yaml` real run, manipulation check that effort levels are
+behaviorally distinct, golden-set judge validation). See `docs/PROJECT.md` for M0-M4.

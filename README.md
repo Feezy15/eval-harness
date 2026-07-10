@@ -48,7 +48,8 @@ uv run pytest && uv run ruff check .
 # Real run (coming in M1 — set OPENAI_API_KEY / ANTHROPIC_API_KEY first)
 uv run python -m collab_eval.runner --config configs/experiment.yaml
 
-# Render plots from a results file (coming in M1)
+# Render the utility-vs-effort plot from a results file
+# (writes results/<run>_utility_vs_effort.png; override with --out)
 uv run python -m collab_eval.analysis --results results/<run>.jsonl
 ```
 

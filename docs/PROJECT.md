@@ -113,9 +113,11 @@ Repo skeleton, config loading, interfaces defined, a **mock model** so the loop 
   over a deterministic per-scenario checklist, `Task.judge_criteria`; CoT-before-verdict, code
   computes the met-fraction score; a consolidation turn after the loop scores one restated
   artifact instead of the raw last turn; `build_judge` wires the response cache through the judge
-  — decision 18) are done; 120 tests green. Remaining chunks: (6) `analysis.py` + the DoD plot,
-  (7) `experiment.yaml` + the real run with a manipulation check that effort levels are
-  behaviorally distinct, plus the golden-set judge validation deferred from chunk 5.
+  — decision 18), and chunk 6 (`analysis.py`: JSONL → per-cell aggregation → the utility-vs-effort
+  figure, mean line per model + per-seed dots, exercised end-to-end in CI on smoke output —
+  decision 19) are done; 123 tests green. Remaining chunk: (7) `experiment.yaml` + the real run
+  with a manipulation check that effort levels are behaviorally distinct, plus the golden-set
+  judge validation deferred from chunk 5.
 
 ### ⬜ M2 — The extension (cost/latency-vs-utility)
 Add token/cost/latency logging and render **utility-per-dollar** and **utility-per-second** curves; add a 2nd
