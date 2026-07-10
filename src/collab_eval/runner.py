@@ -82,6 +82,12 @@ def run_episode(
     `tracer` defaults to a no-op (an episode called standalone, e.g. from a
     test, is untraced rather than silently becoming a root trace of its own
     tracer provider)."""
+    if user_sim.user_context != task.user_context(seed):
+        raise ValueError(
+            f"user_sim.user_context does not match task.user_context(seed={seed}) "
+            f"for task {task.name!r}: the episode would be judged against a "
+            "different scenario than the sim was given"
+        )
     # `is not None`, not truthiness: a falsy-but-present label must never silently
     # alias an episode to a different identity.
     label = model_label if model_label is not None else agent.name

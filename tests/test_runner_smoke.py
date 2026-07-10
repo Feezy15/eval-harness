@@ -147,7 +147,9 @@ def test_user_sim_stop_signal_ends_episode_early():
     task = ToyTask()
     agent = MockModel(model="mock-agent", seed=0)
     user_sim = UserSimulator(
-        model=AlwaysStopsModel(f"Looks good, thanks. {STOP_SENTINEL}"), effort="passive"
+        model=AlwaysStopsModel(f"Looks good, thanks. {STOP_SENTINEL}"),
+        effort="passive",
+        user_context=task.user_context(0),
     )
     judge = MockJudge(model="mock-judge", rubric_version="v0")
 
