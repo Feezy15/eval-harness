@@ -9,9 +9,9 @@ on which scenario they're describing.
 """
 
 import pytest
-from collab_eval.tasks.trip_planning import _SCENARIOS, TripPlanningTask
 
 from collab_eval.tasks import TASK_REGISTRY
+from collab_eval.tasks.trip_planning import _SCENARIOS, TripPlanningTask
 
 N_SCENARIOS = len(_SCENARIOS)
 
