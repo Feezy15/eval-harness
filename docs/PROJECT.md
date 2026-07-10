@@ -105,12 +105,14 @@ Repo skeleton, config loading, interfaces defined, a **mock model** so the loop 
 - **Status (2026-07-09, in progress on `m1-mvp`):** chunk 1 (prompt files + content fingerprint,
   bookend stop-sentinel), chunk 2 (OTel span layer over run → episode → turn/LLM-call; GenAI
   semconv; JSONL stays the analysis source of truth; `experiment_hash` blind to telemetry —
-  decision 14), and chunk 3 (OpenAI + Anthropic wrappers, snapshot-dated pricing table with
+  decision 14), chunk 3 (OpenAI + Anthropic wrappers, snapshot-dated pricing table with
   fail-loud unknown models, disk response cache as a composition wrapper excluded from experiment
-  identity — decision 15) are done; 100 tests green. Remaining chunks: (4) `trip_planning` +
-  seeded `Task.user_context` for the sim (with canary leak tests; wire the cache through the
-  judge when the LLM judge lands), (5) real LLM judge with fenced transcripts, (6) `analysis.py`
-  + the DoD plot, (7) `experiment.yaml` + the real run.
+  identity — decision 15), and chunk 4 (`trip_planning` task; seeded `Task.user_context` as the
+  sim's private channel; judge scores full ground truth via `judge_context(seed)`; canary
+  leak tests make channel isolation a CI invariant — decision 17) are done; 105 tests green.
+  Remaining chunks: (5) real LLM judge with fenced transcripts (wire the cache through the judge
+  when it lands), (6) `analysis.py` + the DoD plot, (7) `experiment.yaml` + the real run with a
+  manipulation check that effort levels are behaviorally distinct.
 
 ### ⬜ M2 — The extension (cost/latency-vs-utility)
 Add token/cost/latency logging and render **utility-per-dollar** and **utility-per-second** curves; add a 2nd

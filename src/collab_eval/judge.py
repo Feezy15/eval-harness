@@ -24,8 +24,14 @@ class Judge(ABC):
     model: str
 
     @abstractmethod
-    def score(self, task: Task, transcript: Sequence[Message]) -> JudgeScore:
-        """Score the final transcript, normalized to [0, 1]."""
+    def score(self, task: Task, transcript: Sequence[Message], seed: int) -> JudgeScore:
+        """Score the final transcript, normalized to [0, 1].
+
+        `seed` selects the scenario's ground truth via `task.judge_context(seed)`
+        — the same seed that produced the episode's `initial_goal`/`user_context`,
+        so the judge scores against the requirements this particular episode
+        actually had, not an arbitrary one.
+        """
 
 
 def render_transcript(transcript: Sequence[Message]) -> str:
@@ -47,13 +53,13 @@ class MockJudge(Judge):
         # behavior across every episode it scores.
         self._model = MockModel(model=model, seed=0)
 
-    def score(self, task: Task, transcript: Sequence[Message]) -> JudgeScore:
+    def score(self, task: Task, transcript: Sequence[Message], seed: int) -> JudgeScore:
         rendered = render_transcript(transcript)
         response = self._model.next_turn(
             [
                 Message(
                     role="system",
-                    content=f"Rubric {self.rubric_version}: {task.judge_context()}",
+                    content=f"Rubric {self.rubric_version}: {task.judge_context(seed)}",
                 ),
                 Message(role="user", content=rendered),
             ]

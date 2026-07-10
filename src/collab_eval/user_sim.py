@@ -12,7 +12,6 @@ from pydantic import BaseModel
 
 from collab_eval.models.base import AgentModel
 from collab_eval.prompts import load_prompt
-from collab_eval.tasks.base import Task
 from collab_eval.types import EffortLevel, Message, Usage
 
 # The user-sim's model emits this to say "I have what I need; end the episode".
@@ -53,11 +52,12 @@ class UserTurn(BaseModel):
 
 
 class UserSimulator:
-    def __init__(self, model: AgentModel, effort: EffortLevel):
+    def __init__(self, model: AgentModel, effort: EffortLevel, user_context: str = ""):
         self.model = model
         self.effort = effort
+        self.user_context = user_context
 
-    def next_user_turn(self, task: Task, conversation: Sequence[Message]) -> UserTurn:
+    def next_user_turn(self, conversation: Sequence[Message]) -> UserTurn:
         """Produce the next *user* message for the agent's conversation.
 
         The backing LLM plays the user, so it sees the conversation with roles
@@ -65,24 +65,36 @@ class UserSimulator:
         is replying to. Without this flip the model would try to continue the
         agent's side instead of answering it.
 
-        The goal goes in the sim's *system prompt*, not the flipped history
-        (standard user-sim design, cf. tau-bench): the system prompt is the
-        private-state channel for instructions the agent must never see, and a
-        flipped history that opened with the goal would start with an
-        assistant-role message, which the Anthropic API rejects. Note the
-        judge's rubric is deliberately NOT shown to the sim — a user who knows
-        the scoring criteria steers toward them, contaminating the
-        effort-vs-utility comparison.
+        The goal (and `user_context`, if any) goes in the sim's *system
+        prompt*, not the flipped history (standard user-sim design, cf.
+        tau-bench): the system prompt is the private-state channel for
+        instructions the agent must never see, and a flipped history that
+        opened with the goal would start with an assistant-role message,
+        which the Anthropic API rejects. Note the judge's rubric is
+        deliberately NOT shown to the sim — a user who knows the scoring
+        criteria steers toward them, contaminating the effort-vs-utility
+        comparison.
         """
         # The agent conversation is [system, user(goal), assistant, user, ...]:
         # the goal moves into the sim's system prompt; only turns after it are
         # flipped, so the sim history starts with a user-role message.
         goal, *rest = [m for m in conversation if m.role != "system"]
+        # user_context sits between the effort prompt and the goal: the effort
+        # prompt sets *how* to behave, user_context is *what the user privately
+        # knows*, and the goal is what's public — reading top to bottom mirrors
+        # the actual information hierarchy the sim is role-playing.
+        context_block = (
+            f"\n\nYour private requirements/preferences (the assistant cannot see "
+            f"this):\n{self.user_context}"
+            if self.user_context
+            else ""
+        )
         sim_conversation = [
             Message(
                 role="system",
                 content=(
-                    f"{EFFORT_PROMPTS[self.effort]}\n\n"
+                    f"{EFFORT_PROMPTS[self.effort]}"
+                    f"{context_block}\n\n"
                     f"You are the user in this conversation. Your goal:\n{goal.content}\n\n"
                     f"When you are satisfied and want to end the conversation, reply "
                     f"with {STOP_SENTINEL}."

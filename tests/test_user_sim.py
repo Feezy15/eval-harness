@@ -11,9 +11,9 @@ from collections.abc import Sequence
 import pytest
 
 from collab_eval.models.base import AgentModel
-from collab_eval.tasks.toy import ToyTask
 from collab_eval.types import Message, ModelResponse, Usage
 from collab_eval.user_sim import STOP_SENTINEL, UserSimulator
+from conftest import RecordingModel
 
 
 class _FixedReplyModel(AgentModel):
@@ -32,14 +32,14 @@ class _FixedReplyModel(AgentModel):
         )
 
 
-def _sim_turn(reply: str):
-    sim = UserSimulator(model=_FixedReplyModel(reply), effort="passive")
+def _sim_turn(reply: str, user_context: str = ""):
+    sim = UserSimulator(model=_FixedReplyModel(reply), effort="passive", user_context=user_context)
     conversation = [
         Message(role="system", content="framing"),
         Message(role="user", content="goal"),
         Message(role="assistant", content="a proposal"),
     ]
-    return sim.next_user_turn(ToyTask(), conversation)
+    return sim.next_user_turn(conversation)
 
 
 @pytest.mark.parametrize(
@@ -71,3 +71,20 @@ def test_sentinel_mention_mid_reply_does_not_stop(reply):
     turn = _sim_turn(reply)
     assert turn.message is not None
     assert turn.message.role == "user"
+
+
+def test_user_context_appears_in_sim_system_prompt():
+    # user_context is the hidden-requirements channel the sim's private system
+    # prompt must carry — the whole point of separating it from the agent-visible
+    # goal is that the sim (and only the sim) sees it.
+    backend = RecordingModel()
+    canary = "CANARY_USER_CONTEXT_abc123"
+    sim = UserSimulator(model=backend, effort="passive", user_context=canary)
+    conversation = [
+        Message(role="system", content="framing"),
+        Message(role="user", content="goal"),
+    ]
+    sim.next_user_turn(conversation)
+    (call,) = backend.received
+    system_msg = next(m for m in call if m.role == "system")
+    assert canary in system_msg.content

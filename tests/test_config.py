@@ -21,7 +21,7 @@ def test_smoke_config_loads_with_expected_values():
     assert cfg.output_dir == Path("results")
     assert cfg.seeds == [0, 1]
     assert cfg.max_turns == 3
-    assert [t.name for t in cfg.tasks] == ["toy"]
+    assert [t.name for t in cfg.tasks] == ["toy", "trip_planning"]
     assert cfg.models[0].provider == "mock"
     assert cfg.models[0].model == "mock-agent"
     assert cfg.models[0].temperature == 0.0
