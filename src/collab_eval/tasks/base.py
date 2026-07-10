@@ -52,3 +52,16 @@ class Task(ABC):
         have wanted, not just what a given effort level happened to surface,
         or low-effort runs would look artificially strong.
         """
+
+    @abstractmethod
+    def judge_criteria(self, seed: int) -> list[str]:
+        """The fixed checklist the judge scores the final artifact against.
+
+        Each entry is one binary check phrased so `met=True` is the positive
+        outcome. Must be *deterministic* for a given seed: if the judge model
+        enumerated its own checklist from `judge_context`'s prose instead, the
+        denominator (and therefore the met-fraction score) would vary call to
+        call, and scores from two episodes of the same scenario would stop
+        being comparable — the one thing an additive checklist is supposed
+        to buy over a holistic rating.
+        """

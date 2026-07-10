@@ -115,5 +115,12 @@ config), episode loop + matrix runner (agent temperature recorded per episode), 
 keyless CI (pulled forward from M3). Design decisions + gaps: `docs/architecture.md` (see 10–12 for
 the review-hardening round).
 
-**Next: M1** (trip_planning task, OpenAI + Anthropic wrappers, real effort prompts, LLM judge + rubric v1,
-utility-vs-effort plot). See `docs/PROJECT.md` for M0–M4.
+**M1 in progress on `m1-mvp`** (chunks 1-5 of 7 done; see `docs/PROJECT.md` for the chunk list and
+`docs/architecture.md` decisions 14-18). Chunk 5 landed the real `LLMJudge`: a deterministic
+per-task checklist (`Task.judge_criteria`) scored via CoT-then-verdict JSON, met-fraction computed
+in code; a consolidation turn after the agent/user-sim loop (stop or cap) elicits one restated
+final artifact so the judge never scores an arbitrary last turn; `build_judge` resolves
+`JudgeConfig` to `MockJudge` or a cache-wrapped `LLMJudge`. 120 tests green.
+
+**Next:** chunk 6 (`analysis.py` + the utility-vs-effort plot), chunk 7 (`experiment.yaml` real run,
+manipulation check, golden-set judge validation). See `docs/PROJECT.md` for M0-M4.

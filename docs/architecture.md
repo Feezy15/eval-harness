@@ -405,6 +405,52 @@ it for auditability — isolation is about model-visible channels; the log is ne
   exist under it. Behavioral distinctness of effort levels on this task is unverified until the
   M1 manipulation check runs on real models (mock models ignore their prompts).
 
+### 18. Checklist judge over a consolidated artifact, not the raw transcript
+
+`Task` gains a fifth method, `judge_criteria(seed)`: a fixed, deterministic list of binary checks
+derived from the same ground truth `judge_context` already carries. `LLMJudge` (real, composed
+over an `AgentModel` like `UserSimulator`) sends the judge model the checklist plus the final
+artifact fenced as data, and asks for one `{reasoning, met}` pair per item; `score = met fraction`
+is computed in code, never asked of the model. Before scoring, `run_episode` appends one
+consolidation turn after the loop ends (stop or cap) — a user-role elicitation asking the agent to
+restate the complete plan — so `transcript[-1]` is always a full artifact, not whatever the last
+in-loop message happened to be.
+
+- **Why checklist, not Likert:** a holistic 0–10 score (the chunk-1 `rubric_v1` placeholder) has no
+  audit trail and no denominator — two "7/10"s aren't obviously comparable, and a verbose,
+  confident-sounding plan can inflate a holistic score without actually satisfying more
+  requirements. An additive checklist makes each requirement's coverage independently inspectable
+  and blunts verbosity/self-preference bias: a binary check doesn't reward length or fluency, only
+  whether the specific fact is present.
+- **Why CoT before verdict:** the schema puts `reasoning` before `met` in each criterion object.
+  Autoregressive generation means the field written first is the one the model actually reasons
+  its way to; verdict-first would make `reasoning` post-hoc justification of a decision already
+  made. Every criterion is phrased so `met: true` is the positive outcome — one framing throughout,
+  no "score low if X" items to accidentally invert.
+- **Why a consolidation turn:** the natural last in-loop message is usually a delta ("swapped Hotel
+  X for Y"), not the plan — and that failure mode is not symmetric across effort levels. More
+  active-steering episodes mean more refinement rounds, which means the final in-loop turn is
+  *more* likely to be an edit rather than a restatement — so scoring the raw last turn would bias
+  the measurement against the very effort levels the study cares most about getting right. One
+  extra agent call, outside `max_turns` (reserving an in-cap slot would instead shorten the
+  collaboration itself), fixes the target the judge scores regardless of how the loop ended.
+  Logged as an ordinary costed `TurnRecord`/`agent.turn` span — no separate accounting path.
+- **Why final-only, not per-turn trajectories:** one judge call per episode keeps cost bounded and
+  keeps the artifact-scoring contract simple (a transcript prefix is just a shorter transcript, so
+  per-turn trajectories stay a strict extension, not a redesign, if pursued later).
+- **Why process isn't scored:** the checklist is entirely about the artifact against ground truth —
+  no criterion rewards back-and-forth, question-asking, or turn count. Effort level is the
+  independent variable; scoring collaborative *process* would bake the treatment into the
+  measurement instrument itself.
+- **Non-convergence is data:** an episode that never produces a satisfying plan scores low on the
+  checklist — that's the measured phenomenon, not an error. Only a judge response that fails to
+  parse (not-JSON, wrong criteria count, missing reasoning, non-boolean verdict) raises — an
+  instrument failure is categorically different from a bad-but-legible answer.
+- **Gaps:** golden-set ordering tests (gold / flawed / degenerate artifacts, plus an injection
+  case) are deferred to the next chunk, alongside the effort-level manipulation check — both need
+  real model calls to be meaningful. Judge-model sensitivity (does score depend on which model
+  judges?) is unstudied, parked with the cross-family ensemble idea in PROJECT.md §6.
+
 ## Testing strategy
 
 Tests were written red-first (each test file failed before its implementation existed):
@@ -413,16 +459,17 @@ Tests were written red-first (each test file failed before its implementation ex
   bad effort level, duplicate matrix cells, blank/colliding labels, temperature bounds)
 - `tests/test_mock_model.py` — mock determinism, nonzero synthetic usage, `Usage` arithmetic
 - `tests/test_runner_smoke.py` — the end-to-end contract: matrix completeness, JSONL round-trip,
-  CSV shape, transcript alternation, turn cap, total-cost accounting (no untracked calls), replay
-  determinism, early stop via a stub sim backend, temperature-variant identity separation, and
-  config-driven sim temperature
+  CSV shape, transcript alternation, turn cap, the consolidation turn ending every episode
+  (`[..., user(elicitation), assistant]`, stop- or cap-terminated alike), total-cost accounting
+  including the consolidation call, replay determinism, early stop via a stub sim backend,
+  temperature-variant identity separation, and config-driven sim temperature
 - `tests/test_prompts.py` — prompt loader fail-loud path, fingerprint determinism and
   content/rename sensitivity, and the fingerprint's stamping into JSONL + CSV records
 - `tests/test_user_sim.py` — stop-sentinel semantics: bare and wrapped signals stop the episode,
   mid-reply mentions do not; `user_context` lands in the sim's system prompt
 - `tests/test_trip_planning.py` — seed-stability across repeated calls, distinct scenarios per
-  seed, modulo wrap for out-of-range seeds, destination consistency across all three views, and
-  registry lookup
+  seed, modulo wrap for out-of-range seeds, destination consistency across all three views,
+  `judge_criteria` matching the scenario (7 items) and stable across calls, and registry lookup
 - channel isolation (in `test_runner_smoke.py`) — canary tokens in `user_context`/`judge_context`
   reach only their consumer: never the agent's conversation, the logged transcript, or each
   other's inputs; the episode record carries the `user_context` it ran with
@@ -440,16 +487,22 @@ Tests were written red-first (each test file failed before its implementation ex
 - `tests/test_providers.py` — stubbed SDK clients, zero network: request mapping (params, system
   extraction for Anthropic), usage mapping, content-extraction edge cases, and fail-loud paths
   (missing env key, missing `max_tokens`, empty content)
+- `tests/test_judge.py` — `LLMJudge` over a stub `AgentModel`: met-fraction scoring, code-fence
+  tolerance, fail-loud parsing (not-JSON, wrong criteria count, empty reasoning, non-boolean
+  verdict); `build_judge` resolving mock vs. a registered provider, and cache wrapping of the
+  backing model when enabled
 
 Run with `uv run pytest` — no keys, no network.
 
 ## Extending
 
-- **New task:** implement `Task`'s four methods in one module (mind the channel contract:
-  `user_context` is sim-only, `judge_context` judge-only), register in
+- **New task:** implement `Task`'s five methods in one module (mind the channel contract:
+  `user_context` is sim-only, `judge_context`/`judge_criteria` judge-only), register in
   `tasks/__init__.py:TASK_REGISTRY`, reference by name in config.
 - **New model provider:** implement `AgentModel.next_turn` with constructor
   `(model, seed, temperature, max_tokens=None)`, register in
   `models/__init__.py:MODEL_REGISTRY`, and add the model's rates to `models/pricing.py`
   (unknown models fail loud at call time).
-- **New judge:** implement `Judge.score`, register in `judge.py:JUDGE_REGISTRY`.
+- **New judge:** implement `Judge.score`; `build_judge` (`judge.py`) resolves `provider: mock` to
+  `MockJudge` and everything else to `LLMJudge` over `MODEL_REGISTRY` — a new non-mock judge
+  implementation is a `build_judge` branch, not a new registry.

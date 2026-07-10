@@ -114,6 +114,16 @@ class TripPlanningTask(Task):
             "involved a traveler you're playing:\n\n" + _render_requirements(scenario)
         )
 
+    def judge_criteria(self, seed: int) -> list[str]:
+        scenario = _SCENARIOS[seed % len(_SCENARIOS)]
+        return [
+            f"The plan is for {scenario['destination']}.",
+            f"The plan covers the dates {scenario['dates']}.",
+            f"The plan fits the budget: {scenario['budget']}.",
+            f"The plan accommodates the party: {scenario['party']}.",
+            *(f"The plan satisfies this constraint: {c}." for c in scenario["constraints"]),
+        ]
+
     def judge_context(self, seed: int) -> str:
         scenario = _SCENARIOS[seed % len(_SCENARIOS)]
         return (

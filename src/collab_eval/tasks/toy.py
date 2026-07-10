@@ -38,3 +38,10 @@ class ToyTask(Task):
             "Score how complete, concrete, and responsive-to-feedback the final "
             "plan is for the user's stated scenario."
         )
+
+    def judge_criteria(self, seed: int) -> list[str]:
+        return [
+            "A concrete plan exists for the stated scenario.",
+            "The plan is specific (names, times, quantities) rather than generic filler.",
+            "Feedback the user gave earlier in the conversation is incorporated.",
+        ]

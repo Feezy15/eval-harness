@@ -102,17 +102,20 @@ Repo skeleton, config loading, interfaces defined, a **mock model** so the loop 
 ### 🔜 M1 — MVP (reproduce the core idea)
 1 real task (`trip_planning`), 2 models, 3 effort levels, LLM-as-judge rubric; produce the **utility-vs-effort** plot.
 - **DoD:** a plot showing utility rising with involvement, and a note on where agents plateau/underperform.
-- **Status (2026-07-09, in progress on `m1-mvp`):** chunk 1 (prompt files + content fingerprint,
+- **Status (2026-07-10, in progress on `m1-mvp`):** chunk 1 (prompt files + content fingerprint,
   bookend stop-sentinel), chunk 2 (OTel span layer over run → episode → turn/LLM-call; GenAI
   semconv; JSONL stays the analysis source of truth; `experiment_hash` blind to telemetry —
   decision 14), chunk 3 (OpenAI + Anthropic wrappers, snapshot-dated pricing table with
   fail-loud unknown models, disk response cache as a composition wrapper excluded from experiment
-  identity — decision 15), and chunk 4 (`trip_planning` task; seeded `Task.user_context` as the
+  identity — decision 15), chunk 4 (`trip_planning` task; seeded `Task.user_context` as the
   sim's private channel; judge scores full ground truth via `judge_context(seed)`; canary
-  leak tests make channel isolation a CI invariant — decision 17) are done; 105 tests green.
-  Remaining chunks: (5) real LLM judge with fenced transcripts (wire the cache through the judge
-  when it lands), (6) `analysis.py` + the DoD plot, (7) `experiment.yaml` + the real run with a
-  manipulation check that effort levels are behaviorally distinct.
+  leak tests make channel isolation a CI invariant — decision 17), and chunk 5 (real `LLMJudge`
+  over a deterministic per-scenario checklist, `Task.judge_criteria`; CoT-before-verdict, code
+  computes the met-fraction score; a consolidation turn after the loop scores one restated
+  artifact instead of the raw last turn; `build_judge` wires the response cache through the judge
+  — decision 18) are done; 120 tests green. Remaining chunks: (6) `analysis.py` + the DoD plot,
+  (7) `experiment.yaml` + the real run with a manipulation check that effort levels are
+  behaviorally distinct, plus the golden-set judge validation deferred from chunk 5.
 
 ### ⬜ M2 — The extension (cost/latency-vs-utility)
 Add token/cost/latency logging and render **utility-per-dollar** and **utility-per-second** curves; add a 2nd

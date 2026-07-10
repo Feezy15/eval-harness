@@ -80,6 +80,8 @@ class JudgeConfig(_StrictModel):
     provider: str
     model: str
     rubric_version: str
+    temperature: float = Field(default=0.0, ge=0)
+    max_tokens: int | None = Field(default=None, ge=1)
 
 
 class TelemetryConfig(_StrictModel):

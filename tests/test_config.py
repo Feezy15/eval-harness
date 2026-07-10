@@ -129,13 +129,17 @@ def test_blank_label_rejected(tmp_path, label):
         load_config(write_yaml(tmp_path, data))
 
 
-@pytest.mark.parametrize("block", ["models", "user_sim"], ids=["model", "user_sim"])
+@pytest.mark.parametrize(
+    "block", ["models", "user_sim", "judge"], ids=["model", "user_sim", "judge"]
+)
 def test_negative_temperature_rejected(tmp_path, block):
     data = smoke_dict()
     if block == "models":
         data["models"][0]["temperature"] = -0.5
-    else:
+    elif block == "user_sim":
         data["user_sim"]["temperature"] = -0.5
+    else:
+        data["judge"]["temperature"] = -0.5
     with pytest.raises(ValidationError):
         load_config(write_yaml(tmp_path, data))
 
@@ -165,15 +169,23 @@ def test_model_max_tokens_defaults_to_none():
     cfg = load_config(SMOKE_YAML)
     assert cfg.models[0].max_tokens is None
     assert cfg.user_sim.max_tokens is None
+    # Judge sampling knobs default the same way: temperature 0 (a measuring
+    # instrument, not a treatment condition) and max_tokens unset.
+    assert cfg.judge.temperature == 0.0
+    assert cfg.judge.max_tokens is None
 
 
-@pytest.mark.parametrize("block", ["models", "user_sim"], ids=["model", "user_sim"])
+@pytest.mark.parametrize(
+    "block", ["models", "user_sim", "judge"], ids=["model", "user_sim", "judge"]
+)
 def test_max_tokens_below_one_rejected(tmp_path, block):
     data = smoke_dict()
     if block == "models":
         data["models"][0]["max_tokens"] = 0
-    else:
+    elif block == "user_sim":
         data["user_sim"]["max_tokens"] = 0
+    else:
+        data["judge"]["max_tokens"] = 0
     with pytest.raises(ValidationError):
         load_config(write_yaml(tmp_path, data))
 

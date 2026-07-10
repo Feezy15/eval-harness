@@ -31,8 +31,9 @@ from collab_eval.types import EpisodeResult
 from collab_eval.user_sim import UserSimulator
 from conftest import EXPECTED_EPISODES, SMOKE_YAML, AlwaysStopsModel
 
-# smoke.yaml: 1 task x 1 model x 3 effort levels x 2 seeds, max_turns=3, and the
-# mock sim never stops -> per episode: 3 agent turns, 2 sim turns, 1 judge call.
+# smoke.yaml: 2 tasks x 1 model x 3 effort levels x 2 seeds, max_turns=3, and the
+# mock sim never stops -> per episode: 3 in-loop agent turns + 1 consolidation
+# call, 2 sim turns, 1 judge call.
 TRACE_ID_RE = re.compile(r"^[0-9a-f]{32}$")
 
 
@@ -130,7 +131,8 @@ def test_span_tree_mirrors_run_episode_calls(traced_run):
     episode_spans = _spans_by_name(spans, "episode")
     assert len(run_spans) == 1
     assert len(episode_spans) == EXPECTED_EPISODES
-    assert len(_spans_by_name(spans, "agent.turn")) == EXPECTED_EPISODES * cfg.max_turns
+    # +1 per episode for the consolidation call, which sits outside max_turns.
+    assert len(_spans_by_name(spans, "agent.turn")) == EXPECTED_EPISODES * (cfg.max_turns + 1)
     assert len(_spans_by_name(spans, "user_sim.turn")) == EXPECTED_EPISODES * (cfg.max_turns - 1)
     assert len(_spans_by_name(spans, "judge.score")) == EXPECTED_EPISODES
 
@@ -309,7 +311,9 @@ def test_stop_probe_is_a_flagged_span_and_standalone_episode_is_a_root_trace():
     # flagged so a trace viewer shows where the sim chose to end the episode.
     (stop_span,) = _spans_by_name(spans, "user_sim.turn")
     assert stop_span.attributes["collab_eval.stopped"] is True
-    assert len(_spans_by_name(spans, "agent.turn")) == 1
+    # One in-loop turn plus the consolidation call, which runs regardless of
+    # how the loop ended.
+    assert len(_spans_by_name(spans, "agent.turn")) == 2
 
 
 def test_run_episode_without_tracer_stays_untraced():

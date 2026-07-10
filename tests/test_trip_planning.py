@@ -59,3 +59,26 @@ def test_destination_is_consistent_across_all_three_views(seed):
     assert destination in task.initial_goal(seed)
     assert destination in task.user_context(seed)
     assert destination in task.judge_context(seed)
+
+
+@pytest.mark.parametrize("seed", range(N_SCENARIOS))
+def test_judge_criteria_has_seven_items_matching_scenario(seed):
+    # The checklist denominator must be deterministic (fixed per scenario) so
+    # scores are comparable across episodes of the same seed — 4 scenario
+    # fields (destination/dates/budget/party) + one per constraint (3).
+    task = TripPlanningTask()
+    scenario = _SCENARIOS[seed % N_SCENARIOS]
+    criteria = task.judge_criteria(seed)
+    assert len(criteria) == 7
+    joined = " ".join(criteria)
+    assert scenario["destination"] in joined
+    assert scenario["dates"] in joined
+    assert scenario["budget"] in joined
+    assert scenario["party"] in joined
+    for constraint in scenario["constraints"]:
+        assert any(constraint in c for c in criteria)
+
+
+def test_judge_criteria_is_stable_across_repeated_calls():
+    task = TripPlanningTask()
+    assert task.judge_criteria(0) == task.judge_criteria(0)

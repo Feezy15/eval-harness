@@ -17,15 +17,22 @@ from opentelemetry.trace import Tracer, format_trace_id
 
 from collab_eval import telemetry
 from collab_eval.config import Config, ModelConfig, experiment_hash, load_config
-from collab_eval.judge import JUDGE_REGISTRY, Judge
+from collab_eval.judge import Judge, build_judge
 from collab_eval.models import MODEL_REGISTRY, AgentModel
 from collab_eval.models.cache import CachedModel, ResponseCache
 from collab_eval.models.pricing import PRICING_VERSION
-from collab_eval.prompts import PROMPTS_FINGERPRINT
+from collab_eval.prompts import PROMPTS_FINGERPRINT, load_prompt
 from collab_eval.tasks import TASK_REGISTRY, Task
 from collab_eval.telemetry import build_tracer
 from collab_eval.types import EpisodeResult, Message, TurnRecord, Usage
 from collab_eval.user_sim import UserSimulator
+
+# The last in-loop agent turn is often a delta ("swapped Hotel X for Y"), not
+# the plan — and that failure mode biases *against* high-effort episodes (more
+# refinement rounds make the final turn more likely to be an edit rather than
+# a restatement). So every episode gets one extra agent call, outside the
+# max_turns cap, eliciting the complete artifact the judge actually scores.
+FINAL_ARTIFACT_REQUEST = load_prompt("final_artifact_request")
 
 
 def _lookup[T](registry: Mapping[str, T], key: str, kind: str) -> T:
@@ -72,7 +79,11 @@ def run_episode(
     tracer: Tracer | None = None,
 ) -> EpisodeResult:
     """One episode: agent and simulated user alternate until the user stops
-    or the turn cap is hit; then the judge scores the transcript.
+    or the turn cap is hit; then one final "write the whole plan out" agent
+    call produces the artifact the judge scores (see `FINAL_ARTIFACT_REQUEST`).
+    An episode therefore makes at most `max_turns + 1` agent calls, not
+    `max_turns` — the consolidation call sits outside the cap so it can never
+    shorten the collaboration itself.
 
     `model_label` is the agent's identity in the episode id and result rows —
     config entries that share a base model (e.g. a temperature ablation) pass
@@ -181,6 +192,39 @@ def run_episode(
                 break  # the simulated user is satisfied
             conversation.append(user_turn.message)
 
+        # Consolidation turn: runs unconditionally, whether the loop ended via
+        # a stop signal or the cap, so `transcript[-1]` is the full artifact
+        # by construction — the contract the judge relies on — rather than
+        # whatever the last in-loop message happened to be.
+        conversation.append(Message(role="user", content=FINAL_ARTIFACT_REQUEST))
+        turn_index = len(turns)
+        with tracer.start_as_current_span("agent.turn") as consolidation_span:
+            response = agent.next_turn(conversation)
+            if consolidation_span.is_recording():
+                consolidation_span.set_attribute(telemetry.ATTR_ACTOR, "agent")
+                consolidation_span.set_attribute(telemetry.ATTR_TURN_INDEX, turn_index)
+                consolidation_span.set_attribute(telemetry.ATTR_GENAI_MODEL, agent.model)
+                consolidation_span.set_attribute(
+                    telemetry.ATTR_GENAI_TEMPERATURE, agent.temperature
+                )
+                consolidation_span.set_attribute(
+                    telemetry.ATTR_GENAI_INPUT_TOKENS, response.usage.input_tokens
+                )
+                consolidation_span.set_attribute(
+                    telemetry.ATTR_GENAI_OUTPUT_TOKENS, response.usage.output_tokens
+                )
+                consolidation_span.set_attribute(telemetry.ATTR_COST_USD, response.usage.cost_usd)
+                consolidation_span.set_attribute(telemetry.ATTR_LATENCY_S, response.usage.latency_s)
+        conversation.append(response.message)
+        turns.append(
+            TurnRecord(
+                turn_index=turn_index,
+                actor="agent",
+                message=response.message,
+                usage=response.usage,
+            )
+        )
+
         with tracer.start_as_current_span("judge.score") as judge_span:
             judge_score = judge.score(task, conversation, seed)
             if judge_span.is_recording():
@@ -246,14 +290,13 @@ def run_matrix(
     out_dir.mkdir(parents=True, exist_ok=True)
     config_hash = experiment_hash(config)
 
+    cache = ResponseCache(config.cache.dir) if config.cache.enabled else None
+
     # Judge construction can fail (provider names resolve here at build time,
     # not at config-load time), so it happens before the tracer provider is
     # built: nothing may fail between building the provider and entering the
     # try/finally that guarantees its shutdown, or the provider would leak.
-    judge_cls = _lookup(JUDGE_REGISTRY, config.judge.provider, "judge provider")
-    judge = judge_cls(model=config.judge.model, rubric_version=config.judge.rubric_version)
-
-    cache = ResponseCache(config.cache.dir) if config.cache.enabled else None
+    judge = build_judge(config.judge, cache)
 
     # Only build (and later shut down) a provider we own; an injected tracer
     # belongs to its caller.

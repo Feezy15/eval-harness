@@ -72,17 +72,22 @@ def test_transcript_structure_turn_cap_and_totals(smoke_run):
         roles = [m.role for m in ep.transcript]
         # Opens with the task framing and the (seeded) user goal…
         assert roles[:2] == ["system", "user"]
-        # …then strictly alternates assistant/user: multi-turn, not a monologue.
-        for i, role in enumerate(roles[2:]):
+        # …then strictly alternates assistant/user (the in-loop turns), followed
+        # by the consolidation pair: one more user (elicitation) + assistant
+        # (final artifact) appended after the loop ends, cap or no cap.
+        for i, role in enumerate(roles[2:-2]):
             assert role == ("assistant" if i % 2 == 0 else "user")
+        assert roles[-2:] == ["user", "assistant"]
 
         # The mock user-sim never volunteers to stop, so the runner's hard cap
-        # must be what ends the episode.
+        # must be what ends the in-loop turns; +1 for the consolidation call,
+        # which sits outside the cap by design.
         n_agent = sum(1 for r in roles if r == "assistant")
-        assert n_agent == cfg.max_turns
+        assert n_agent == cfg.max_turns + 1
 
-        # Totals are the sum of every logged call (agent + user-sim + judge):
-        # cost accounting must have no untracked calls.
+        # Totals are the sum of every logged call (agent + user-sim + judge),
+        # including the consolidation call: cost accounting must have no
+        # untracked calls.
         recomputed = sum((t.usage for t in ep.turns), Usage.zero()) + ep.judge.usage
         assert ep.totals == recomputed
 
@@ -155,11 +160,14 @@ def test_user_sim_stop_signal_ends_episode_early():
 
     ep = run_episode(task=task, agent=agent, user_sim=user_sim, judge=judge, seed=0, max_turns=5)
 
-    # One agent turn, then the user is satisfied — well under the cap.
-    assert sum(1 for m in ep.transcript if m.role == "assistant") == 1
+    # One in-loop agent turn, then the user is satisfied — well under the cap
+    # — plus the consolidation call, which runs regardless of how the loop ended.
+    assert sum(1 for m in ep.transcript if m.role == "assistant") == 2
     # The stop signal itself is not a conversational turn: it must not leak
     # sentinel text into the transcript the judge scores.
     assert all(STOP_SENTINEL not in m.content for m in ep.transcript)
+    # Ends with the elicitation + final artifact, as the judge contract requires.
+    assert [m.role for m in ep.transcript[-2:]] == ["user", "assistant"]
 
 
 # --- channel isolation: user_context / judge_context are private per-consumer
@@ -186,6 +194,9 @@ class _CanaryTask(Task):
 
     def judge_context(self, seed: int) -> str:
         return _JUDGE_CANARY
+
+    def judge_criteria(self, seed: int) -> list[str]:
+        return [_JUDGE_CANARY]
 
 
 class _RecordingJudge(Judge):
