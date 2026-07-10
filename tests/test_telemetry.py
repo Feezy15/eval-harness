@@ -290,7 +290,9 @@ def test_tracer_from_config_console_exporter_prints_spans(capfd):
 def test_stop_probe_is_a_flagged_span_and_standalone_episode_is_a_root_trace():
     task = ToyTask()
     agent = MockModel(model="mock-agent", seed=0)
-    user_sim = UserSimulator(model=AlwaysStopsModel(), effort="passive")
+    user_sim = UserSimulator(
+        model=AlwaysStopsModel(), effort="passive", user_context=task.user_context(0)
+    )
     judge = MockJudge(model="mock-judge", rubric_version="v0")
     tracer, exporter = _capturing_tracer()
 
@@ -311,10 +313,13 @@ def test_stop_probe_is_a_flagged_span_and_standalone_episode_is_a_root_trace():
 
 
 def test_run_episode_without_tracer_stays_untraced():
+    task = ToyTask()
     ep = run_episode(
-        task=ToyTask(),
+        task=task,
         agent=MockModel(model="mock-agent", seed=0),
-        user_sim=UserSimulator(model=AlwaysStopsModel(), effort="passive"),
+        user_sim=UserSimulator(
+            model=AlwaysStopsModel(), effort="passive", user_context=task.user_context(0)
+        ),
         judge=MockJudge(model="mock-judge", rubric_version="v0"),
         seed=0,
         max_turns=5,

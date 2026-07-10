@@ -24,13 +24,23 @@ from collab_eval.user_sim import STOP_SENTINEL
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SMOKE_YAML = REPO_ROOT / "configs" / "smoke.yaml"
 
-# smoke.yaml: 1 task x 1 model x 3 effort levels x 2 seeds.
-EXPECTED_EPISODES = 6
-
 
 def smoke_dict() -> dict:
     with SMOKE_YAML.open() as f:
         return yaml.safe_load(f)
+
+
+def _expected_episodes() -> int:
+    data = smoke_dict()
+    return (
+        len(data["tasks"])
+        * len(data["models"])
+        * len(data["user_sim"]["effort_levels"])
+        * len(data["seeds"])
+    )
+
+
+EXPECTED_EPISODES = _expected_episodes()
 
 
 def write_yaml(tmp_path: Path, data: dict) -> Path:
@@ -62,6 +72,30 @@ class AlwaysStopsModel(AgentModel):
     def next_turn(self, conversation: Sequence[Message]) -> ModelResponse:
         return ModelResponse(
             message=Message(role="assistant", content=self._content),
+            usage=Usage(input_tokens=1, output_tokens=1, cost_usd=1e-6, latency_s=0.01),
+        )
+
+
+class RecordingModel(AgentModel):
+    """Stub backend that replies with a fixed message and records every
+    conversation it's called with — used to assert on exactly what a given
+    channel (agent vs. user-sim backend) was shown, e.g. that private
+    per-consumer context (`Task.user_context`, `Task.judge_context`) never
+    crosses into a channel it doesn't belong to.
+    """
+
+    name = "stub:recording"
+    model = "stub-model"
+    temperature = 0.0
+
+    def __init__(self, reply: str = STOP_SENTINEL):
+        self._reply = reply
+        self.received: list[list[Message]] = []
+
+    def next_turn(self, conversation: Sequence[Message]) -> ModelResponse:
+        self.received.append(list(conversation))
+        return ModelResponse(
+            message=Message(role="assistant", content=self._reply),
             usage=Usage(input_tokens=1, output_tokens=1, cost_usd=1e-6, latency_s=0.01),
         )
 

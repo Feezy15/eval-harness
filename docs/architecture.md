@@ -377,6 +377,34 @@ CI reports branch coverage (`pytest --cov`, term-missing) with no `--cov-fail-un
   that mutates `smoke_run.results` would poison later tests in subtle ways (frozen dataclass guards
   the top level only). Coverage regressions rely on a human noticing the CI table.
 
+### 17. Hidden requirements are a private channel; the judge scores ground truth
+
+`Task` gains a fourth method, `user_context(seed)`: the simulated user's hidden requirements
+(budget, dates, constraints), rendered only into the sim's system prompt. The same seed selects
+one scenario for all views — `initial_goal` reveals just destination + intent, `user_context`
+carries the full requirements, and `judge_context(seed)` carries the same ground truth plus
+scoring guidance. `Judge.score(task, transcript, seed)` gains the seed so the judge scores the
+requirements *this episode actually had*. The runner pre-renders `user_context` into the
+`UserSimulator` constructor (the sim never sees a seed or a `Task`), and the episode record logs
+it for auditability — isolation is about model-visible channels; the log is never model input.
+
+- **Why ground truth, not surfaced requirements:** utility must mean *true-goal coverage*. If the
+  judge only scored what the user happened to say, a passive episode would score high for covering
+  the little that surfaced, and the utility-vs-effort curve would flatten artificially — erasing
+  the very effect the harness exists to measure. The gap between `initial_goal` and `user_context`
+  *is* the experimental treatment; effort level governs how much of it surfaces.
+- **Why isolation is executable, not conventional:** each role builds its own message list and
+  private state enters only that role's system prompt (decision 3's pattern), but chunk 4 makes it
+  a CI invariant: canary tokens planted in `user_context`/`judge_context` are asserted to appear
+  only in their consumer's channel — never in the agent's conversation, the logged transcript, or
+  each other's inputs. A leak here would let the agent shortcut the elicitation the experiment
+  measures, or let ground truth contaminate the sim.
+- **Gaps:** the sim *choosing* to reveal a hidden requirement is the treatment, not a leak — the
+  canary test can't (and shouldn't) prevent voluntary disclosure by a real sim model. Scenario
+  tables are small (4 per task) and hand-written; `rubric_version` stays `v1` until real results
+  exist under it. Behavioral distinctness of effort levels on this task is unverified until the
+  M1 manipulation check runs on real models (mock models ignore their prompts).
+
 ## Testing strategy
 
 Tests were written red-first (each test file failed before its implementation existed):
@@ -391,7 +419,13 @@ Tests were written red-first (each test file failed before its implementation ex
 - `tests/test_prompts.py` — prompt loader fail-loud path, fingerprint determinism and
   content/rename sensitivity, and the fingerprint's stamping into JSONL + CSV records
 - `tests/test_user_sim.py` — stop-sentinel semantics: bare and wrapped signals stop the episode,
-  mid-reply mentions do not
+  mid-reply mentions do not; `user_context` lands in the sim's system prompt
+- `tests/test_trip_planning.py` — seed-stability across repeated calls, distinct scenarios per
+  seed, modulo wrap for out-of-range seeds, destination consistency across all three views, and
+  registry lookup
+- channel isolation (in `test_runner_smoke.py`) — canary tokens in `user_context`/`judge_context`
+  reach only their consumer: never the agent's conversation, the logged transcript, or each
+  other's inputs; the episode record carries the `user_context` it ran with
 - `tests/test_telemetry.py` — the span layer's observational contract: `experiment_hash` blind to
   telemetry settings, disabled telemetry changes nothing (byte-identical transcripts/scores/totals
   traced vs. untraced), span-tree shape and parentage (`run` → `episode` → calls), episode- and
@@ -411,7 +445,8 @@ Run with `uv run pytest` — no keys, no network.
 
 ## Extending
 
-- **New task:** implement `Task`'s three methods in one module, register in
+- **New task:** implement `Task`'s four methods in one module (mind the channel contract:
+  `user_context` is sim-only, `judge_context` judge-only), register in
   `tasks/__init__.py:TASK_REGISTRY`, reference by name in config.
 - **New model provider:** implement `AgentModel.next_turn` with constructor
   `(model, seed, temperature, max_tokens=None)`, register in

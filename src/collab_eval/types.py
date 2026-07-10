@@ -96,6 +96,8 @@ class EpisodeResult(BaseModel):
     temperature: float
     effort: EffortLevel
     seed: int
+    # The sim's private requirements, logged for auditability
+    user_context: str
     transcript: list[Message]
     turns: list[TurnRecord]
     totals: Usage  # summed over every logged call: agent + user-sim + judge

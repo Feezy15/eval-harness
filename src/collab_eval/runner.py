@@ -82,6 +82,12 @@ def run_episode(
     `tracer` defaults to a no-op (an episode called standalone, e.g. from a
     test, is untraced rather than silently becoming a root trace of its own
     tracer provider)."""
+    if user_sim.user_context != task.user_context(seed):
+        raise ValueError(
+            f"user_sim.user_context does not match task.user_context(seed={seed}) "
+            f"for task {task.name!r}: the episode would be judged against a "
+            "different scenario than the sim was given"
+        )
     # `is not None`, not truthiness: a falsy-but-present label must never silently
     # alias an episode to a different identity.
     label = model_label if model_label is not None else agent.name
@@ -140,7 +146,7 @@ def run_episode(
 
             turn_index = len(turns)
             with tracer.start_as_current_span("user_sim.turn") as sim_span:
-                user_turn = user_sim.next_user_turn(task, conversation)
+                user_turn = user_sim.next_user_turn(conversation)
                 stopped = user_turn.message is None
                 if sim_span.is_recording():
                     sim_span.set_attribute(telemetry.ATTR_ACTOR, "user_sim")
@@ -176,7 +182,7 @@ def run_episode(
             conversation.append(user_turn.message)
 
         with tracer.start_as_current_span("judge.score") as judge_span:
-            judge_score = judge.score(task, conversation)
+            judge_score = judge.score(task, conversation, seed)
             if judge_span.is_recording():
                 judge_span.set_attribute(telemetry.ATTR_ACTOR, "judge")
                 judge_span.set_attribute(telemetry.ATTR_GENAI_MODEL, judge.model)
@@ -211,6 +217,7 @@ def run_episode(
         temperature=agent.temperature,
         effort=user_sim.effort,
         seed=seed,
+        user_context=user_sim.user_context,
         transcript=conversation,
         turns=turns,
         totals=totals,
@@ -282,7 +289,11 @@ def run_matrix(
                                 episode = run_episode(
                                     task,
                                     agent,
-                                    UserSimulator(model=sim_model, effort=effort),
+                                    UserSimulator(
+                                        model=sim_model,
+                                        effort=effort,
+                                        user_context=task.user_context(seed),
+                                    ),
                                     judge,
                                     seed=seed,
                                     max_turns=config.max_turns,

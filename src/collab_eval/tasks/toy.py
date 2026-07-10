@@ -1,7 +1,7 @@
 """A trivial deterministic task so the episode loop has something to chew on.
 
 Exists for smoke runs and CI — real tasks (trip planning, CSV cleaning)
-implement the same three methods.
+implement the same four methods.
 """
 
 from collab_eval.tasks.base import Task
@@ -29,7 +29,11 @@ class ToyTask(Task):
         scenario = _SCENARIOS[seed % len(_SCENARIOS)]
         return f"Help me plan {scenario}. I haven't thought through the details yet."
 
-    def judge_context(self) -> str:
+    def user_context(self, seed: int) -> str:
+        scenario = _SCENARIOS[seed % len(_SCENARIOS)]
+        return f"You're planning {scenario}. Answer follow-up questions if the assistant asks."
+
+    def judge_context(self, seed: int) -> str:
         return (
             "Score how complete, concrete, and responsive-to-feedback the final "
             "plan is for the user's stated scenario."

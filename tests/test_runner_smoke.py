@@ -6,17 +6,19 @@ episode stop conditions, and replay determinism).
 """
 
 import csv
+from collections.abc import Sequence
 
 import yaml
 
 from collab_eval.config import load_config
-from collab_eval.judge import MockJudge
+from collab_eval.judge import Judge, MockJudge
 from collab_eval.models.mock import MockModel
 from collab_eval.runner import run_episode, run_matrix
+from collab_eval.tasks.base import Task
 from collab_eval.tasks.toy import ToyTask
-from collab_eval.types import EpisodeResult, Usage
+from collab_eval.types import EpisodeResult, JudgeScore, Message, Usage
 from collab_eval.user_sim import STOP_SENTINEL, UserSimulator
-from conftest import EXPECTED_EPISODES, SMOKE_YAML, AlwaysStopsModel
+from conftest import EXPECTED_EPISODES, SMOKE_YAML, AlwaysStopsModel, RecordingModel
 
 
 def test_matrix_writes_jsonl_that_round_trips(smoke_run):
@@ -145,7 +147,9 @@ def test_user_sim_stop_signal_ends_episode_early():
     task = ToyTask()
     agent = MockModel(model="mock-agent", seed=0)
     user_sim = UserSimulator(
-        model=AlwaysStopsModel(f"Looks good, thanks. {STOP_SENTINEL}"), effort="passive"
+        model=AlwaysStopsModel(f"Looks good, thanks. {STOP_SENTINEL}"),
+        effort="passive",
+        user_context=task.user_context(0),
     )
     judge = MockJudge(model="mock-judge", rubric_version="v0")
 
@@ -156,3 +160,74 @@ def test_user_sim_stop_signal_ends_episode_early():
     # The stop signal itself is not a conversational turn: it must not leak
     # sentinel text into the transcript the judge scores.
     assert all(STOP_SENTINEL not in m.content for m in ep.transcript)
+
+
+# --- channel isolation: user_context / judge_context are private per-consumer
+# state, not conversation. A leak here would let the agent see the sim's
+# hidden requirements (defeating the underspecified-goal premise), or let the
+# judge's ground truth reach the agent or sim (contaminating the very
+# effort-vs-utility comparison the harness measures).
+
+_SIM_CANARY = "CANARY_USER_CTX_7f3a"
+_JUDGE_CANARY = "CANARY_JUDGE_CTX_9b1e"
+
+
+class _CanaryTask(Task):
+    name = "canary"
+
+    def agent_system_prompt(self) -> str:
+        return "You are a helpful planning assistant."
+
+    def initial_goal(self, seed: int) -> str:
+        return "Help me plan something."
+
+    def user_context(self, seed: int) -> str:
+        return _SIM_CANARY
+
+    def judge_context(self, seed: int) -> str:
+        return _JUDGE_CANARY
+
+
+class _RecordingJudge(Judge):
+    """Scores nothing meaningful — records the judge_context it was given so
+    the test can assert the judge canary reached only the judge."""
+
+    rubric_version = "v0"
+    model = "stub-judge"
+
+    def __init__(self):
+        self.received_context: str | None = None
+
+    def score(self, task: Task, transcript: Sequence[Message], seed: int) -> JudgeScore:
+        self.received_context = task.judge_context(seed)
+        return JudgeScore(
+            score=0.5,
+            rationale="ok",
+            rubric_version=self.rubric_version,
+            usage=Usage(input_tokens=1, output_tokens=1, cost_usd=1e-6, latency_s=0.01),
+        )
+
+
+def test_user_context_and_judge_context_never_cross_channels():
+    task = _CanaryTask()
+    seed = 0
+    agent = RecordingModel(reply="a proposal")
+    sim_backend = RecordingModel(reply=STOP_SENTINEL)
+    user_sim = UserSimulator(
+        model=sim_backend, effort="passive", user_context=task.user_context(seed)
+    )
+    judge = _RecordingJudge()
+
+    ep = run_episode(task=task, agent=agent, user_sim=user_sim, judge=judge, seed=seed, max_turns=5)
+
+    assert any(_SIM_CANARY in m.content for m in sim_backend.received[0])
+    for conversation in agent.received:
+        assert all(_SIM_CANARY not in m.content for m in conversation)
+    assert all(_SIM_CANARY not in m.content for m in ep.transcript)
+
+    assert judge.received_context == _JUDGE_CANARY
+    for conversation in [*agent.received, *sim_backend.received]:
+        assert all(_JUDGE_CANARY not in m.content for m in conversation)
+
+    # Auditability: the episode record carries the user_context it ran with.
+    assert ep.user_context == task.user_context(seed)
