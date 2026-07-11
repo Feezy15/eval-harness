@@ -39,7 +39,10 @@ _SEED_DODGE_STEP = 0.02  # per-seed offset within a model's cluster
 
 def load_results(path: Path) -> list[EpisodeResult]:
     with path.open() as f:
-        return [EpisodeResult.model_validate_json(line) for line in f if line.strip()]
+        episodes = [EpisodeResult.model_validate_json(line) for line in f if line.strip()]
+    if not episodes:
+        raise ValueError(f"No episodes in {path} — nothing to analyze")
+    return episodes
 
 
 def utility_by_effort(results: list[EpisodeResult]) -> pd.DataFrame:
