@@ -1,13 +1,12 @@
 """Shared test scaffolding: the smoke config path, YAML mutate-and-reload
-helpers, a small conversation builder, and a reusable "stops immediately"
-stub backend — duplicated near-identically across the suite before this file
-existed.
+helpers, a small conversation builder, and the scripted stub backends.
 
 Plain module-level names, not fixtures: none of this needs fixture semantics
 (no setup/teardown, no request-scoped state), so a fixture would just add
 indirection over a function call.
 """
 
+import json
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -53,50 +52,69 @@ def conv(system: str = "s", user: str = "hello") -> list[Message]:
     return [Message(role="system", content=system), Message(role="user", content=user)]
 
 
-class AlwaysStopsModel(AgentModel):
-    """Stub backend that signals stop on its first reply.
+# One fixed usage for every scripted reply, so per-episode totals in tests are
+# exact multiples of it — cost accounting stays assertable without arithmetic
+# scattered across test files.
+STUB_USAGE = Usage(input_tokens=1, output_tokens=1, cost_usd=1e-6, latency_s=0.01)
 
-    Used to end an episode after exactly one agent turn without depending on
-    a real user-sim model's judgment. `content` defaults to the bare sentinel;
-    pass a wrapped/prefixed variant to exercise the sentinel-detection edges
-    that `_signals_stop` (not this stub) is responsible for.
+
+class ScriptedModel(AgentModel):
+    """Stub backend with scripted replies: `contents` in order, the last one
+    repeating, every conversation recorded in `.calls`.
+
+    One stub covers what used to be four near-copies: a fixed reply is a
+    one-item script; no arguments means "stop immediately" (the bare sentinel,
+    for ending an episode after exactly one agent turn); a call count is
+    `len(.calls)`; channel-isolation assertions read `.calls` contents; and a
+    multi-item script exercises retry/repair paths that need the reply to
+    change between calls.
     """
 
-    name = "stub:always-stops"
-    model = "stub-user"
-    temperature = 0.0
-
-    def __init__(self, content: str = STOP_SENTINEL):
-        self._content = content
-
-    def next_turn(self, conversation: Sequence[Message]) -> ModelResponse:
-        return ModelResponse(
-            message=Message(role="assistant", content=self._content),
-            usage=Usage(input_tokens=1, output_tokens=1, cost_usd=1e-6, latency_s=0.01),
-        )
-
-
-class RecordingModel(AgentModel):
-    """Stub backend that replies with a fixed message and records every
-    conversation it's called with — used to assert on exactly what a given
-    channel (agent vs. user-sim backend) was shown, e.g. that private
-    per-consumer context (`Task.user_context`, `Task.judge_context`) never
-    crosses into a channel it doesn't belong to.
-    """
-
-    name = "stub:recording"
+    name = "stub:scripted"
     model = "stub-model"
     temperature = 0.0
 
-    def __init__(self, reply: str = STOP_SENTINEL):
-        self._reply = reply
-        self.received: list[list[Message]] = []
+    def __init__(self, *contents: str):
+        self._contents = contents or (STOP_SENTINEL,)
+        self.calls: list[list[Message]] = []
 
     def next_turn(self, conversation: Sequence[Message]) -> ModelResponse:
-        self.received.append(list(conversation))
+        self.calls.append(list(conversation))
+        content = self._contents[min(len(self.calls), len(self._contents)) - 1]
         return ModelResponse(
-            message=Message(role="assistant", content=self._reply),
-            usage=Usage(input_tokens=1, output_tokens=1, cost_usd=1e-6, latency_s=0.01),
+            message=Message(role="assistant", content=content),
+            usage=STUB_USAGE,
+        )
+
+
+def canned_checklist(met_flags: list[bool]) -> str:
+    """A well-formed judge checklist response with the given verdicts."""
+    return json.dumps(
+        {
+            "criteria": [
+                {"index": i, "reasoning": f"reason {i}", "met": met}
+                for i, met in enumerate(met_flags, start=1)
+            ]
+        }
+    )
+
+
+class FakeProviderModel(AgentModel):
+    """Stand-in for a real provider's AgentModel: same constructor shape as
+    MockModel/OpenAIModel/AnthropicModel, but no network and no API key —
+    anything resolving providers through MODEL_REGISTRY just needs something
+    registrable. Always replies with an all-met checklist sized to ToyTask's
+    three criteria."""
+
+    def __init__(self, model: str, seed: int, temperature: float, max_tokens: int | None = None):
+        self.model = model
+        self.temperature = temperature
+        self.name = f"fake:{model}"
+
+    def next_turn(self, conversation: Sequence[Message]) -> ModelResponse:
+        return ModelResponse(
+            message=Message(role="assistant", content=canned_checklist([True, True, True])),
+            usage=STUB_USAGE,
         )
 
 

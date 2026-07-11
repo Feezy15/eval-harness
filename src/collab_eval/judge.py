@@ -18,7 +18,7 @@ from collab_eval.models.cache import CachedModel, ResponseCache
 from collab_eval.models.mock import MockModel
 from collab_eval.prompts import load_prompt
 from collab_eval.tasks.base import Task
-from collab_eval.types import JudgeScore, Message, Usage
+from collab_eval.types import CriterionVerdict, JudgeScore, Message, Usage
 
 
 class Judge(ABC):
@@ -216,6 +216,7 @@ class LLMJudge(Judge):
             rationale=rationale,
             rubric_version=self.rubric_version,
             usage=usage,
+            criteria=[CriterionVerdict(met=c["met"], reasoning=c["reasoning"]) for c in parsed],
         )
 
 

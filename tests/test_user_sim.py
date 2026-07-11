@@ -6,34 +6,15 @@ once the plan is final") — a false stop that truncates the episode and biases
 the utility measurement downward.
 """
 
-from collections.abc import Sequence
-
 import pytest
 
-from collab_eval.models.base import AgentModel
-from collab_eval.types import Message, ModelResponse, Usage
+from collab_eval.types import Message
 from collab_eval.user_sim import STOP_SENTINEL, UserSimulator
-from conftest import RecordingModel
-
-
-class _FixedReplyModel(AgentModel):
-    """Sim backend that replies with exactly the text under test."""
-
-    name = "stub:fixed-reply"
-    temperature = 0.0
-
-    def __init__(self, reply: str):
-        self._reply = reply
-
-    def next_turn(self, conversation: Sequence[Message]) -> ModelResponse:
-        return ModelResponse(
-            message=Message(role="assistant", content=self._reply),
-            usage=Usage(input_tokens=1, output_tokens=1, cost_usd=1e-6, latency_s=0.01),
-        )
+from conftest import ScriptedModel
 
 
 def _sim_turn(reply: str, user_context: str = ""):
-    sim = UserSimulator(model=_FixedReplyModel(reply), effort="passive", user_context=user_context)
+    sim = UserSimulator(model=ScriptedModel(reply), effort="passive", user_context=user_context)
     conversation = [
         Message(role="system", content="framing"),
         Message(role="user", content="goal"),
@@ -77,7 +58,7 @@ def test_user_context_appears_in_sim_system_prompt():
     # user_context is the hidden-requirements channel the sim's private system
     # prompt must carry — the whole point of separating it from the agent-visible
     # goal is that the sim (and only the sim) sees it.
-    backend = RecordingModel()
+    backend = ScriptedModel()
     canary = "CANARY_USER_CONTEXT_abc123"
     sim = UserSimulator(model=backend, effort="passive", user_context=canary)
     conversation = [
@@ -85,6 +66,6 @@ def test_user_context_appears_in_sim_system_prompt():
         Message(role="user", content="goal"),
     ]
     sim.next_user_turn(conversation)
-    (call,) = backend.received
+    (call,) = backend.calls
     system_msg = next(m for m in call if m.role == "system")
     assert canary in system_msg.content

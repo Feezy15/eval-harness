@@ -56,6 +56,15 @@ class ModelResponse(BaseModel):
     usage: Usage
 
 
+class CriterionVerdict(BaseModel):
+    """One checklist item's boolean verdict plus the judge's stated reasoning
+    for it — the per-criterion detail golden-set validation compares against
+    hand-labeled expectations, one entry per `task.judge_criteria` item."""
+
+    met: bool
+    reasoning: str
+
+
 class JudgeScore(BaseModel):
     score: float = Field(ge=0.0, le=1.0)  # normalized so scores are comparable across tasks
     rationale: str
@@ -64,6 +73,7 @@ class JudgeScore(BaseModel):
     # numbers into one plot.
     rubric_version: str
     usage: Usage
+    criteria: list[CriterionVerdict] | None = None
 
 
 class TurnRecord(BaseModel):

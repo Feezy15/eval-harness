@@ -18,7 +18,7 @@ from collab_eval.tasks.base import Task
 from collab_eval.tasks.toy import ToyTask
 from collab_eval.types import EpisodeResult, JudgeScore, Message, Usage
 from collab_eval.user_sim import STOP_SENTINEL, UserSimulator
-from conftest import EXPECTED_EPISODES, SMOKE_YAML, AlwaysStopsModel, RecordingModel
+from conftest import EXPECTED_EPISODES, SMOKE_YAML, ScriptedModel
 
 
 def test_matrix_writes_jsonl_that_round_trips(smoke_run):
@@ -152,7 +152,7 @@ def test_user_sim_stop_signal_ends_episode_early():
     task = ToyTask()
     agent = MockModel(model="mock-agent", seed=0)
     user_sim = UserSimulator(
-        model=AlwaysStopsModel(f"Looks good, thanks. {STOP_SENTINEL}"),
+        model=ScriptedModel(f"Looks good, thanks. {STOP_SENTINEL}"),
         effort="passive",
         user_context=task.user_context(0),
     )
@@ -222,8 +222,8 @@ class _RecordingJudge(Judge):
 def test_user_context_and_judge_context_never_cross_channels():
     task = _CanaryTask()
     seed = 0
-    agent = RecordingModel(reply="a proposal")
-    sim_backend = RecordingModel(reply=STOP_SENTINEL)
+    agent = ScriptedModel("a proposal")
+    sim_backend = ScriptedModel(STOP_SENTINEL)
     user_sim = UserSimulator(
         model=sim_backend, effort="passive", user_context=task.user_context(seed)
     )
@@ -231,13 +231,13 @@ def test_user_context_and_judge_context_never_cross_channels():
 
     ep = run_episode(task=task, agent=agent, user_sim=user_sim, judge=judge, seed=seed, max_turns=5)
 
-    assert any(_SIM_CANARY in m.content for m in sim_backend.received[0])
-    for conversation in agent.received:
+    assert any(_SIM_CANARY in m.content for m in sim_backend.calls[0])
+    for conversation in agent.calls:
         assert all(_SIM_CANARY not in m.content for m in conversation)
     assert all(_SIM_CANARY not in m.content for m in ep.transcript)
 
     assert judge.received_context == _JUDGE_CANARY
-    for conversation in [*agent.received, *sim_backend.received]:
+    for conversation in [*agent.calls, *sim_backend.calls]:
         assert all(_JUDGE_CANARY not in m.content for m in conversation)
 
     # Auditability: the episode record carries the user_context it ran with.

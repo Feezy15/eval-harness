@@ -29,7 +29,7 @@ from collab_eval.tasks.toy import ToyTask
 from collab_eval.telemetry import tracer_from_config
 from collab_eval.types import EpisodeResult
 from collab_eval.user_sim import UserSimulator
-from conftest import EXPECTED_EPISODES, SMOKE_YAML, AlwaysStopsModel
+from conftest import EXPECTED_EPISODES, SMOKE_YAML, ScriptedModel
 
 # smoke.yaml: 2 tasks x 1 model x 3 effort levels x 2 seeds, max_turns=3, and the
 # mock sim never stops -> per episode: 3 in-loop agent turns + 1 consolidation
@@ -293,7 +293,7 @@ def test_stop_probe_is_a_flagged_span_and_standalone_episode_is_a_root_trace():
     task = ToyTask()
     agent = MockModel(model="mock-agent", seed=0)
     user_sim = UserSimulator(
-        model=AlwaysStopsModel(), effort="passive", user_context=task.user_context(0)
+        model=ScriptedModel(), effort="passive", user_context=task.user_context(0)
     )
     judge = MockJudge(model="mock-judge", rubric_version="v0")
     tracer, exporter = _capturing_tracer()
@@ -322,7 +322,7 @@ def test_run_episode_without_tracer_stays_untraced():
         task=task,
         agent=MockModel(model="mock-agent", seed=0),
         user_sim=UserSimulator(
-            model=AlwaysStopsModel(), effort="passive", user_context=task.user_context(0)
+            model=ScriptedModel(), effort="passive", user_context=task.user_context(0)
         ),
         judge=MockJudge(model="mock-judge", rubric_version="v0"),
         seed=0,
