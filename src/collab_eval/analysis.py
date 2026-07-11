@@ -67,6 +67,61 @@ def utility_by_effort(results: list[EpisodeResult]) -> pd.DataFrame:
     return grouped[["task", "model", "effort", "mean_score", "n"]]
 
 
+def effort_manipulation(results: list[EpisodeResult]) -> pd.DataFrame:
+    """Summarize simulated-user behavior per (task, effort), pooled across models/seeds.
+
+    A rising or flat utility curve is ambiguous on its own: it could reflect a
+    true null, or it could mean the effort levels never actually produced
+    distinguishable user behavior (treatment failure). This does not judge
+    separation — it just computes the numbers a reader needs to check it.
+    """
+    rows = []
+    for r in results:
+        sim_turns = [t for t in r.turns if t.actor == "user_sim"]
+        user_turns = [t for t in sim_turns if t.message is not None]
+        words = sum(len(t.message.content.split()) for t in user_turns)
+        rows.append(
+            {
+                "task": r.task,
+                "effort": r.effort,
+                "n_user_turns": len(user_turns),
+                "words": words,
+                "sim_output_tokens": sum(t.usage.output_tokens for t in sim_turns),
+            }
+        )
+    df = pd.DataFrame(rows)
+    df["effort"] = pd.Categorical(df["effort"], categories=EFFORT_ORDER, ordered=True)
+
+    grouped = (
+        df.groupby(["task", "effort"], observed=True)
+        .agg(
+            n_episodes=("n_user_turns", "count"),
+            mean_user_turns=("n_user_turns", "mean"),
+            total_words=("words", "sum"),
+            total_user_messages=("n_user_turns", "sum"),
+            mean_sim_output_tokens=("sim_output_tokens", "mean"),
+        )
+        .reset_index()
+    )
+    # Zero user messages in a cell yields NaN, not a divide-by-zero error:
+    # there is nothing to average, and that's a fact worth surfacing, not hiding.
+    grouped["mean_words_per_user_message"] = grouped["total_words"] / grouped[
+        "total_user_messages"
+    ].replace(0, float("nan"))
+    grouped["n_episodes"] = grouped["n_episodes"].astype(int)
+    grouped = grouped.sort_values(["task", "effort"]).reset_index(drop=True)
+    return grouped[
+        [
+            "task",
+            "effort",
+            "n_episodes",
+            "mean_user_turns",
+            "mean_words_per_user_message",
+            "mean_sim_output_tokens",
+        ]
+    ]
+
+
 def _model_order(results: list[EpisodeResult]) -> list[str]:
     order: list[str] = []
     for r in results:
@@ -201,6 +256,16 @@ def main(argv: list[str] | None = None) -> None:
     df = utility_by_effort(episodes)
     for row in df.itertuples(index=False):
         print(f"  {row.task}/{row.model}/{row.effort}: mean_score={row.mean_score:.3f} n={row.n}")
+
+    print("effort manipulation check (sim behavior per effort):")
+    manip_df = effort_manipulation(episodes)
+    for row in manip_df.itertuples(index=False):
+        print(
+            f"  {row.task}/{row.effort}: n_episodes={row.n_episodes} "
+            f"mean_user_turns={row.mean_user_turns:.2f} "
+            f"mean_words_per_user_message={row.mean_words_per_user_message:.1f} "
+            f"mean_sim_output_tokens={row.mean_sim_output_tokens:.1f}"
+        )
 
     plot_utility_vs_effort(episodes, out_path)
     print(f"wrote {out_path}")
