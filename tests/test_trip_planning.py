@@ -62,14 +62,21 @@ def test_destination_is_consistent_across_all_three_views(seed):
 
 
 @pytest.mark.parametrize("seed", range(N_SCENARIOS))
-def test_judge_criteria_has_seven_items_matching_scenario(seed):
+def test_judge_criteria_matches_scenario(seed):
     # The checklist denominator must be deterministic (fixed per scenario) so
     # scores are comparable across episodes of the same seed — 4 scenario
-    # fields (destination/dates/budget/party) + one per constraint (3).
+    # fields (destination/dates/budget/party) + one per constraint. The party
+    # criterion is pure composition: a special need (allergy, mobility)
+    # bundled into it would leave an artifact that meets one half but not the
+    # other with no decidable ground-truth label, so needs must be their own
+    # constraint criteria.
     task = TripPlanningTask()
     scenario = _SCENARIOS[seed % N_SCENARIOS]
     criteria = task.judge_criteria(seed)
-    assert len(criteria) == 7
+    assert len(criteria) == 4 + len(scenario["constraints"])
+    party_criterion = next(c for c in criteria if "the party" in c)
+    assert "allergy" not in party_criterion
+    assert "mobility" not in party_criterion
     joined = " ".join(criteria)
     assert scenario["destination"] in joined
     assert scenario["dates"] in joined
@@ -77,6 +84,10 @@ def test_judge_criteria_has_seven_items_matching_scenario(seed):
     assert scenario["party"] in joined
     for constraint in scenario["constraints"]:
         assert any(constraint in c for c in criteria)
+    # The needs that moved out of `party` must still be scored, not dropped.
+    moved_needs = {0: "peanut", 3: "cane"}
+    if seed % N_SCENARIOS in moved_needs:
+        assert moved_needs[seed % N_SCENARIOS] in joined
 
 
 def test_judge_criteria_is_stable_across_repeated_calls():

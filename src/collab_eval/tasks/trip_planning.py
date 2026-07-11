@@ -24,14 +24,19 @@ from collab_eval.tasks.base import Task
 # subset (destination + intent) while `user_context`/`judge_context` render
 # everything — the fields that make a plan actually fit are what a passive
 # user would never think to volunteer up front.
+# `party` is pure composition (who travels); any special need (allergy,
+# mobility) goes in `constraints`, so each judge criterion stays independently
+# decidable — a plan can get the headcount right and still miss the need.
 _SCENARIOS = [
     {
         "destination": "Lisbon",
         "intent": "a long weekend trip",
         "dates": "May 8-11",
         "budget": "$1,200 total for two people",
-        "party": "two adults, one with a peanut allergy",
+        "party": "two adults",
         "constraints": [
+            "one traveler has a severe peanut allergy — restaurant and food "
+            "recommendations must account for it",
             "no red-eye or overnight flights — hard to sleep on planes",
             "at least one hotel with a pool",
             "avoid neighborhoods with a lot of nightlife noise",
@@ -66,9 +71,10 @@ _SCENARIOS = [
         "intent": "a food-focused trip",
         "dates": "the second week of March",
         "budget": "$1,800 total for two people",
-        "party": "two adults, one with limited mobility (uses a cane)",
+        "party": "two adults",
         "constraints": [
-            "lodging and restaurants must be step-free or have elevator access",
+            "one traveler has limited mobility (uses a cane) — lodging and "
+            "restaurants must be step-free or have elevator access",
             "wants a mix of street food and sit-down restaurants",
             "no day trips requiring more than 2 hours of travel each way",
         ],
