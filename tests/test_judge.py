@@ -21,19 +21,23 @@ from collab_eval.types import Message, ModelResponse, Usage
 
 
 class _StubJudgeModel(AgentModel):
-    """Returns a fixed response content regardless of what it's asked —
-    LLMJudge's parsing is what's under test, not any real model's output."""
+    """Returns scripted response contents in order (the last repeats), and
+    records every conversation it receives — LLMJudge's parsing and
+    repair-retry contract is what's under test, not any real model's output."""
 
     name = "stub:judge"
     model = "stub-judge-model"
     temperature = 0.0
 
-    def __init__(self, content: str):
-        self._content = content
+    def __init__(self, *contents: str):
+        self._contents = contents
+        self.calls: list[list[Message]] = []
 
     def next_turn(self, conversation):
+        self.calls.append(list(conversation))
+        content = self._contents[min(len(self.calls), len(self._contents)) - 1]
         return ModelResponse(
-            message=Message(role="assistant", content=self._content),
+            message=Message(role="assistant", content=content),
             usage=Usage(input_tokens=5, output_tokens=7, cost_usd=1e-5, latency_s=0.02),
         )
 
@@ -117,10 +121,35 @@ def test_llm_judge_tolerates_a_markdown_code_fence():
     ids=["not_json", "wrong_criteria_count", "empty_reasoning", "met_not_boolean"],
 )
 def test_llm_judge_fails_loud_on_malformed_output(content):
-    judge = LLMJudge(model=_StubJudgeModel(content), rubric_version="v1")
+    model = _StubJudgeModel(content)
+    judge = LLMJudge(model=model, rubric_version="v1", max_repair_attempts=1)
 
     with pytest.raises(ValueError):
         judge.score(ToyTask(), [Message(role="assistant", content="x")], seed=0)
+
+    # The bounded repair attempt was spent before giving up: persistent
+    # malformation exhausts the retry budget, then stays fail-loud.
+    assert len(model.calls) == 2
+
+
+def test_llm_judge_repairs_a_malformed_response():
+    bad = "this is not json"
+    model = _StubJudgeModel(bad, _canned([True, False, True]))
+    judge = LLMJudge(model=model, rubric_version="v1", max_repair_attempts=1)
+
+    result = judge.score(ToyTask(), [Message(role="assistant", content="x")], seed=0)
+
+    assert result.score == pytest.approx(2 / 3)
+    assert result.usage == Usage(input_tokens=10, output_tokens=14, cost_usd=2e-5, latency_s=0.04)
+    # The repair call extends the same conversation: the malformed response
+    # goes back as the assistant turn it was, and the corrective user message
+    # carries the parse error so the model can see what to fix.
+    assert len(model.calls) == 2
+    first, repair = model.calls
+    assert repair[: len(first)] == first
+    assert repair[len(first)] == Message(role="assistant", content=bad)
+    assert repair[-1].role == "user"
+    assert "not valid JSON" in repair[-1].content
 
 
 def test_llm_judge_rejects_transcript_not_ending_with_assistant():
@@ -146,11 +175,14 @@ def test_build_judge_real_provider_returns_llm_judge_with_cached_backing_model(
     monkeypatch, tmp_path
 ):
     monkeypatch.setitem(MODEL_REGISTRY, "fake", _FakeProviderModel)
-    cfg = JudgeConfig(provider="fake", model="fake-model", rubric_version="v1")
+    cfg = JudgeConfig(
+        provider="fake", model="fake-model", rubric_version="v1", max_repair_attempts=2
+    )
 
     uncached = build_judge(cfg, cache=None)
     assert isinstance(uncached, LLMJudge)
     assert uncached.model == "fake-model"
+    assert uncached.max_repair_attempts == 2
     assert not isinstance(uncached._model, CachedModel)
 
     # Same cfg, cache enabled: the backing model must come back wrapped —

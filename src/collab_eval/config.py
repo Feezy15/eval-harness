@@ -82,6 +82,7 @@ class JudgeConfig(_StrictModel):
     rubric_version: str
     temperature: float = Field(default=0.0, ge=0)
     max_tokens: int | None = Field(default=None, ge=1)
+    max_repair_attempts: int = Field(default=1, ge=0)
 
 
 class TelemetryConfig(_StrictModel):

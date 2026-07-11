@@ -18,7 +18,7 @@ from collab_eval.models.cache import CachedModel, ResponseCache
 from collab_eval.models.mock import MockModel
 from collab_eval.prompts import load_prompt
 from collab_eval.tasks.base import Task
-from collab_eval.types import JudgeScore, Message
+from collab_eval.types import JudgeScore, Message, Usage
 
 
 class Judge(ABC):
@@ -150,13 +150,14 @@ class LLMJudge(Judge):
     cache wrapping come for free from whatever `model` was built with.
     """
 
-    def __init__(self, model: AgentModel, rubric_version: str):
+    def __init__(self, model: AgentModel, rubric_version: str, max_repair_attempts: int = 1):
         self._model = model
         # Judge.model is the raw model string (span attribution), not the
         # AgentModel instance itself — mirrors MockJudge and the runner's use
         # of `user_sim.model.model` for the same purpose.
         self.model = model.model
         self.rubric_version = rubric_version
+        self.max_repair_attempts = max_repair_attempts
 
     def score(self, task: Task, transcript: Sequence[Message], seed: int) -> JudgeScore:
         # transcript[-1] is the runner's consolidation-turn artifact by
@@ -178,13 +179,34 @@ class LLMJudge(Judge):
             f"Checklist ({len(criteria)} items):\n{numbered}\n\n"
             f"{fence_artifact(transcript[-1].content)}"
         )
-        response = self._model.next_turn(
-            [
-                Message(role="system", content=load_prompt(f"rubric_{self.rubric_version}")),
-                Message(role="user", content=user_message),
-            ]
-        )
-        parsed = _parse_criteria(response.message.content, len(criteria))
+        conversation = [
+            Message(role="system", content=load_prompt(f"rubric_{self.rubric_version}")),
+            Message(role="user", content=user_message),
+        ]
+        usage = Usage.zero()
+        attempts_left = self.max_repair_attempts
+        while True:
+            response = self._model.next_turn(conversation)
+            usage += response.usage
+            try:
+                parsed = _parse_criteria(response.message.content, len(criteria))
+                break
+            except ValueError as exc:
+                if attempts_left <= 0:
+                    raise
+                attempts_left -= 1
+                # Extend the same conversation rather than start a fresh one:
+                # the malformed response and the corrective message both need
+                # to be visible to the retry call, and CachedModel keys on the
+                # message list, so the extended conversation naturally gets
+                # its own cache key without any cache-layer changes.
+                conversation = [
+                    *conversation,
+                    Message(role="assistant", content=response.message.content),
+                    Message(
+                        role="user", content=load_prompt("judge_repair").format(error=str(exc))
+                    ),
+                ]
         met_count = sum(1 for c in parsed if c["met"])
         rationale = "\n".join(
             f"[{'met' if c['met'] else 'unmet'}] {c['reasoning']}" for c in parsed
@@ -193,7 +215,7 @@ class LLMJudge(Judge):
             score=met_count / len(criteria),
             rationale=rationale,
             rubric_version=self.rubric_version,
-            usage=response.usage,
+            usage=usage,
         )
 
 
@@ -231,4 +253,8 @@ def build_judge(cfg: JudgeConfig, cache: ResponseCache | None) -> Judge:
         }
         backing = CachedModel(backing, cache, key_params=key_params)
 
-    return LLMJudge(model=backing, rubric_version=cfg.rubric_version)
+    return LLMJudge(
+        model=backing,
+        rubric_version=cfg.rubric_version,
+        max_repair_attempts=cfg.max_repair_attempts,
+    )
