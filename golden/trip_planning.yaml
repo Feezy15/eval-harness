@@ -167,21 +167,23 @@ artifacts:
   - name: kyoto_flawed
     seed: 1
     kind: flawed
-    expected: [true, false, true, true, false, true, true]
+    expected: [true, true, false, true, false, true, true]
     note: >-
-      2: plan is explicitly for December 20 - January 3, not the first two weeks
-      of November. 5: dinners include wagyu kaiseki and a yakitori bar —
-      not vegetarian.
+      3: itemized total $5,200 vs the $3,500 budget. 5: dinners include wagyu
+      kaiseki, a yakitori bar, and sushi — not vegetarian. (Reworked after
+      golden-run triage: the original violated the dates instead, which
+      entangled criterion 6 — "crowds during peak leaf season" is undecidable
+      for a December trip.)
     artifact: |
       Here is your final trip plan for Kyoto, tailored for one adult traveling solo.
       Dates:
-      This plan is explicitly for December 20 - January 3.
+      This plan covers November 1 - November 14, the first two weeks of November.
       Flights & Itemized Budget:
-      Your total trip cost comes to $3,400, fitting your financial requirements.
-      Flights (Round-trip SFO to KIX): $1,200
-      Lodging (14 nights): $1,400
-      Dining: $500
-      Transit & Entry Fees: $300
+      Your total trip cost comes to $5,200.
+      Flights (Round-trip SFO to KIX): $1,800
+      Lodging (13 nights): $2,150
+      Dining: $850
+      Transit & Entry Fees: $400
       Named Lodging & Neighborhood Base:
       You will stay at the Cross Hotel Kyoto in the Nakagyo Ward. This location prioritizes walkable neighborhoods over needing taxis, allowing you to traverse the local area comfortably on foot every single day.
       Named Restaurants:
@@ -189,22 +191,21 @@ artifacts:
       Torito: A vibrant local yakitori bar renowned for its grilled chicken skewers.
       Ganko Sanjo: Excellent traditional sushi sets.
       Day-by-Day Itinerary (Avoiding Peak Sites):
-      To avoid the most crowded tourist sites, this itinerary skips major attractions in favor of quieter, highly serene alternatives.
-      Dec 20: Arrive and check into Cross Hotel Kyoto.
-      Dec 21: Walk the local Nakagyo streets and acclimate.
-      Dec 22: Visit the beautifully quiet Kyoto Botanical Gardens.
-      Dec 23: Explore the vast, peaceful Kamigamo Shrine.
-      Dec 24: Hike the empty mountain trails of Kurama.
-      Dec 25: Walk through the rural, serene village of Kibune.
-      Dec 26: Visit the tranquil Ohara farming village.
-      Dec 27: Enjoy the quiet Sanzen-in temple garden.
-      Dec 28: Walk to Shisendo temple for quiet winter viewing.
-      Dec 29: Explore Enko-ji temple's completely uncrowded grounds.
-      Dec 30: Visit the serene Manshu-in temple.
-      Dec 31: Stroll along the northern Kamo River banks.
-      Jan 1: Visit a quiet local neighborhood shrine to observe New Year traditions.
-      Jan 2: Walk to Honen-in temple.
-      Jan 3: Depart Kyoto for your flight home.
+      To avoid the most crowded tourist sites during the peak foliage season, this itinerary skips Fushimi Inari, Kiyomizu-dera, and the Arashiyama Bamboo Grove in favor of quieter, highly serene alternatives.
+      Nov 1: Arrive and check into Cross Hotel Kyoto.
+      Nov 2: Walk the local Nakagyo streets and acclimate.
+      Nov 3: Visit the beautifully quiet Kyoto Botanical Gardens.
+      Nov 4: Explore the vast, peaceful Kamigamo Shrine.
+      Nov 5: Hike the quiet mountain trails of Kurama.
+      Nov 6: Walk through the rural, serene village of Kibune.
+      Nov 7: Visit the tranquil Ohara farming village.
+      Nov 8: Enjoy the quiet Sanzen-in temple garden.
+      Nov 9: Walk to Shisendo temple for quiet autumn-color viewing.
+      Nov 10: Explore Enko-ji temple's uncrowded grounds.
+      Nov 11: Visit the serene Manshu-in temple.
+      Nov 12: Stroll along the northern Kamo River banks.
+      Nov 13: Walk to Honen-in temple.
+      Nov 14: Depart Kyoto for your flight home.
 
   - name: kyoto_verbose_wrong
     seed: 1
