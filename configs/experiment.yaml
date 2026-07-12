@@ -1,0 +1,48 @@
+# M1 matrix: 2 agents x 3 effort levels x 4 seeds on trip_planning
+# (24 episodes). Estimated cost $1.50-3 at the pinned pricing snapshot;
+# verified against a one-cell pilot (configs/pilot.yaml) before the full run.
+run_name: experiment
+output_dir: results
+seeds: [0, 1, 2, 3]  # one per scenario in the trip_planning table
+max_turns: 6
+
+tasks:
+  - name: trip_planning
+
+# Agent temperature 0.7: remote APIs can't truly seed sampling, so replicate
+# spread has to come from sampling variance — temperature 0 would collapse
+# replicates toward one trajectory and understate it.
+models:
+  - provider: anthropic
+    model: claude-haiku-4-5
+    temperature: 0.7
+    max_tokens: 4096
+  - provider: openai
+    model: gpt-5.4-mini
+    temperature: 0.7
+    max_tokens: 4096
+
+user_sim:
+  provider: openai
+  model: gpt-5.4-mini
+  temperature: 0.7
+  max_tokens: 1024
+  effort_levels: [passive, moderate, active_steering]
+
+# Judge at temperature 0: it's the measuring instrument, so sampling variance
+# in its verdicts is pure noise. Validated against golden/trip_planning.yaml
+# before this config is allowed to spend on the matrix.
+judge:
+  provider: anthropic
+  model: claude-haiku-4-5
+  rubric_version: v1
+  temperature: 0.0
+  max_tokens: 2048
+  max_repair_attempts: 1
+
+telemetry:
+  enabled: true
+
+cache:
+  enabled: true
+  dir: llm_cache

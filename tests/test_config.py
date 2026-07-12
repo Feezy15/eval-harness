@@ -12,7 +12,20 @@ import yaml
 from pydantic import ValidationError
 
 from collab_eval.config import experiment_hash, load_config
-from conftest import SMOKE_YAML, smoke_dict, write_yaml
+from collab_eval.models.pricing import PRICING
+from conftest import REPO_ROOT, SMOKE_YAML, smoke_dict, write_yaml
+
+
+@pytest.mark.parametrize("config_name", ["experiment", "pilot"])
+def test_real_run_configs_are_spend_safe(config_name):
+    # The real-money configs must stay inside the repo guardrails: every LLM
+    # (agents, sim, judge) priced in the table so cost is computed rather than
+    # guessed, max_tokens capped everywhere, and the response cache on.
+    cfg = load_config(REPO_ROOT / "configs" / f"{config_name}.yaml")
+    assert cfg.cache.enabled
+    for c in [*cfg.models, cfg.user_sim, cfg.judge]:
+        assert (c.provider, c.model) in PRICING
+        assert c.max_tokens is not None
 
 
 def test_smoke_config_loads_with_expected_values():

@@ -364,7 +364,10 @@ disk response cache (`models/cache.py`) applied by *composition* — `CachedMode
   fails loud (`ValidationError`) on the next read rather than silently corrupting results;
   temp-file+rename is a cheap later hardening. The pricing table is a single dated snapshot: no
   per-date ranges, and prompt-caching/batch discounts aren't modeled, so recorded costs are
-  list-price upper bounds.
+  list-price upper bounds. Freshness is procedural, not detected: the pre-run step for any paid
+  run is to re-verify the two cited pricing pages and bump `PRICING_VERSION` if anything moved —
+  deliberate, because scraping pricing pages is brittle and a third-party price feed would add a
+  dependency just to validate our four entries; the stamp keeps stale records auditable either way.
 
 ### 16. Test economy: one behavior, one test; coverage is a report, not a gate
 

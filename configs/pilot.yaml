@@ -1,0 +1,42 @@
+# One-cell dress rehearsal before configs/experiment.yaml: a single episode
+# that exercises both provider keys (Anthropic agent + judge, OpenAI sim), the
+# effort prompt at its most demanding level, and the real judge parse — and
+# yields a measured per-episode cost to extrapolate x24 against the spend cap.
+# Cache dir is shared with experiment.yaml on purpose: the pilot episode's
+# calls are the matrix's (haiku, active_steering, seed 0) cell, so the full
+# run replays them from cache instead of paying twice.
+run_name: pilot
+output_dir: results
+seeds: [0]
+max_turns: 6
+
+tasks:
+  - name: trip_planning
+
+models:
+  - provider: anthropic
+    model: claude-haiku-4-5
+    temperature: 0.7
+    max_tokens: 4096
+
+user_sim:
+  provider: openai
+  model: gpt-5.4-mini
+  temperature: 0.7
+  max_tokens: 1024
+  effort_levels: [active_steering]
+
+judge:
+  provider: anthropic
+  model: claude-haiku-4-5
+  rubric_version: v1
+  temperature: 0.0
+  max_tokens: 2048
+  max_repair_attempts: 1
+
+telemetry:
+  enabled: false
+
+cache:
+  enabled: true
+  dir: llm_cache

@@ -3,6 +3,11 @@
 A versioned, hand-maintained table rather than a provider API lookup: pricing
 pages change on their own schedule, and this project's <$30 spend cap depends
 on cost being computed from a rate we've actually checked, not guessed.
+
+Freshness is procedural, not detected: before any paid run, re-verify the
+pages cited below and bump PRICING_VERSION if anything moved. Recorded costs
+always mean "list price as of PRICING_VERSION" — stale is auditable, silent
+drift is not.
 """
 
 PRICING_VERSION = "2026-07-08"  # snapshot date of the source price pages below
