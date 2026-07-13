@@ -107,7 +107,7 @@ Repo skeleton, config loading, interfaces defined, a **mock model** so the loop 
   `claude-haiku-4-5` checklist judge, $1.80): utility rises passive → moderate for both models
   (+0.16/+0.24 met-fraction) then plateaus — extra effort past moderate bought no coverage.
   Manipulation check confirms behaviorally distinct effort levels (23/141/286 words per user
-  message); the judge passed a 21-artifact human-labeled golden set 148/148 (incl. injection
+  message); the judge passed a 21-artifact human-labeled golden set 153/153 (incl. injection
   probes) before any matrix spend. Infrastructure landed across chunks 1–7: prompt fingerprints,
   OTel span layer, real provider wrappers + versioned pricing + response cache, the
   `trip_planning` task with isolated context channels, the checklist `LLMJudge` with

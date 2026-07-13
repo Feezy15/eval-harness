@@ -519,7 +519,11 @@ corrective user message (`prompts/judge_repair.md`) carrying the parse error —
   other judge parameter.
 - **Gaps:** per-episode exception isolation and resume-from-JSONL are deliberately deferred —
   with the cache, re-running a crashed matrix costs ~nothing, so the wedge (not the re-pay) was
-  the real problem, and the repair removes the wedge.
+  the real problem, and the repair removes the wedge. Related (flagged in the M1 PR review,
+  deferred to M2 with the isolation work): when the repair budget is exhausted, `score()` raises
+  before returning, so the failed attempts' accumulated usage never reaches the JSONL or the
+  judge span — real spend (bounded at `max_repair_attempts + 1` judge calls) that the harness's
+  own accounting can't see; the cache still holds the responses.
 
 ### 21. The manipulation check is an analysis aggregation, not a gate
 
@@ -563,9 +567,9 @@ through the judge's real call path; any per-criterion disagreement fails the gat
   CI is a repo invariant); validation is per-rubric-version operational gating, not a regression
   suite. The module's own logic (loader fail-loud paths, agreement detection, exit codes) is
   unit-tested over stubs, keyless.
-- **First run (2026-07-12):** 147/148 criterion agreements; the one disagreement was a fixture
+- **First run (2026-07-12):** 152/153 criterion agreements; the one disagreement was a fixture
   bug — a date violation entangled with the season-tied crowd criterion, undecidable by our own
-  standard — reworked to orthogonal violations, then 148/148. Structured per-criterion verdicts
+  standard — reworked to orthogonal violations, then 153/153. Structured per-criterion verdicts
   (`JudgeScore.criteria`) were added for this comparison and now ride along in every real run's
   JSONL as the checklist audit trail.
 - **Gaps:** N≈21 hand-verified artifacts is a smoke test of the instrument, not a statistical

@@ -121,7 +121,7 @@ the review-hardening round).
 and note in the README's "First results". Chunk 7 landed: judge repair-retry (bounded,
 conversation-extending — decision 20), the effort-manipulation check in `analysis.py` (computes,
 never asserts — decision 21; confirmed 23/141/286 words/message on the real run), golden-set
-judge validation as a CLI gate (`golden/`, 21 human-labeled artifacts, 148/148 after one fixture
+judge validation as a CLI gate (`golden/`, 21 human-labeled artifacts, 153/153 after one fixture
 triage — decision 22), and `experiment.yaml`/`pilot.yaml` behind spend-guardrail tests. Pricing
 freshness is procedural: verify the pages cited in `models/pricing.py` and bump
 `PRICING_VERSION` before any paid run. 137 tests green.

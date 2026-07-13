@@ -50,7 +50,7 @@ are free).
   active-steering users almost never ended the episode voluntarily (1/8, vs 6/8 at the other
   levels) — they steered until the turn cap.
 - **The judge is a validated instrument:** before the run it passed a 21-artifact, human-labeled
-  golden set at 148/148 per-criterion agreement — including two prompt-injection probes, a
+  golden set at 153/153 per-criterion agreement — including two prompt-injection probes, a
   verbosity confound, and minimal pairs isolating single criteria
   (`golden/`, `python -m collab_eval.judge_validation`).
 
