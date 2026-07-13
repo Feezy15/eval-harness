@@ -99,11 +99,23 @@ Repo skeleton, config loading, interfaces defined, a **mock model** so the loop 
   matrix cells and unique model labels are episode identity; keyless CI pulled forward from M3.
   See `docs/architecture.md` for what was built and why.
 
-### 🔜 M1 — MVP (reproduce the core idea)
+### ✅ M1 — MVP (reproduce the core idea)
 1 real task (`trip_planning`), 2 models, 3 effort levels, LLM-as-judge rubric; produce the **utility-vs-effort** plot.
 - **DoD:** a plot showing utility rising with involvement, and a note on where agents plateau/underperform.
+- **Status (2026-07-12): DoD met** — see the README's "First results" for the figure and note.
+  24 real episodes (`claude-haiku-4-5` + `gpt-5.4-mini` agents, `gpt-5.4-mini` sim,
+  `claude-haiku-4-5` checklist judge, $1.80): utility rises passive → moderate for both models
+  (+0.16/+0.24 met-fraction) then plateaus — extra effort past moderate bought no coverage.
+  Manipulation check confirms behaviorally distinct effort levels (23/141/286 words per user
+  message); the judge passed a 21-artifact human-labeled golden set 153/153 (incl. injection
+  probes) before any matrix spend. Infrastructure landed across chunks 1–7: prompt fingerprints,
+  OTel span layer, real provider wrappers + versioned pricing + response cache, the
+  `trip_planning` task with isolated context channels, the checklist `LLMJudge` with
+  consolidation turn and bounded repair-retry, `analysis.py` (figure + manipulation summary),
+  and `judge_validation` as a pre-run CLI gate. 137 tests green; decisions 13–22 in
+  `docs/architecture.md`.
 
-### ⬜ M2 — The extension (cost/latency-vs-utility)
+### 🔜 M2 — The extension (cost/latency-vs-utility)
 Add token/cost/latency logging and render **utility-per-dollar** and **utility-per-second** curves; add a 2nd
 task and/or an open-weight model.
 - **DoD:** a cost-vs-utility plot (not in the paper) plus a short written takeaway.

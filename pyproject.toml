@@ -8,6 +8,12 @@ license = { text = "MIT" }
 # interpreter runs locally (via uv), in CI, and in Docker. Exact package versions live in uv.lock.
 requires-python = "==3.12.*"
 dependencies = [
+    "anthropic>=0.116.0",
+    "matplotlib>=3.9",
+    "openai>=2.44.0",
+    "pandas>=2.2",
+    "opentelemetry-api>=1.43.0",
+    "opentelemetry-sdk>=1.43.0",
     "pydantic>=2.7",
     "pyyaml>=6.0",
 ]
@@ -15,6 +21,7 @@ dependencies = [
 [dependency-groups]
 dev = [
     "pytest>=8.0",
+    "pytest-cov>=7.1.0",
     "ruff>=0.11",
 ]
 
@@ -28,6 +35,14 @@ packages = ["src/collab_eval"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+
+[tool.coverage.run]
+source = ["collab_eval"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
 
 [tool.ruff]
 target-version = "py312"

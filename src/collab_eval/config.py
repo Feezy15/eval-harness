@@ -6,9 +6,11 @@ silently running a different experiment — config bugs are the cheapest bugs to
 catch and the most expensive to discover in a results plot.
 """
 
+import hashlib
 from collections import Counter
 from collections.abc import Sequence
 from pathlib import Path
+from typing import Literal
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -36,6 +38,9 @@ class ModelConfig(_StrictModel):
     provider: str  # resolved against MODEL_REGISTRY at runner build time
     model: str
     temperature: float = Field(default=0.0, ge=0)  # providers enforce their own upper bounds
+    # Unset by default (mock and OpenAI tolerate that); Anthropic requires it
+    # and fails loud at construction if it's still None for that provider.
+    max_tokens: int | None = Field(default=None, ge=1)
     # This entry's identity in episode ids, result rows, and plots. Entries that
     # share a provider+model (e.g. a temperature ablation) need explicit distinct
     # labels, or their results would be indistinguishable downstream.
@@ -59,6 +64,9 @@ class UserSimConfig(_StrictModel):
     # apparatus, not treatment. It lives in config (not code) so it feeds the
     # config hash — two runs with different sim sampling are different experiments.
     temperature: float = Field(default=0.0, ge=0)
+    # Threaded into the ModelConfig the runner builds for the sim's backing
+    # model -- an Anthropic-backed sim needs this set, same as any agent model.
+    max_tokens: int | None = Field(default=None, ge=1)
     effort_levels: list[EffortLevel] = Field(min_length=1)
 
     @field_validator("effort_levels")
@@ -72,6 +80,35 @@ class JudgeConfig(_StrictModel):
     provider: str
     model: str
     rubric_version: str
+    temperature: float = Field(default=0.0, ge=0)
+    max_tokens: int | None = Field(default=None, ge=1)
+    max_repair_attempts: int = Field(default=1, ge=0)
+
+
+class TelemetryConfig(_StrictModel):
+    """Observability knob, not an experiment knob — see `experiment_hash`.
+
+    Disabled by default so existing configs and CI stay exactly as they were
+    before this field existed (no telemetry block => this default applies).
+    """
+
+    enabled: bool = False
+    # "console" for local/manual inspection; "none" for keyless CI and tests
+    # that want real trace ids stamped without anything printing. OTLP/Jaeger
+    # export is a later, optional exporter — not implemented yet.
+    exporter: Literal["console", "none"] = "console"
+
+
+class CacheConfig(_StrictModel):
+    """Disk cache for real LLM responses, keyed on full request identity.
+
+    Enabled by default: real spend should be cached unless explicitly opted
+    out (repo guardrail) — configs that want zero filesystem footprint (e.g.
+    the mock-model smoke config) turn it off explicitly instead.
+    """
+
+    enabled: bool = True
+    dir: str = "llm_cache"
 
 
 class Config(_StrictModel):
@@ -85,6 +122,8 @@ class Config(_StrictModel):
     models: list[ModelConfig] = Field(min_length=1)
     user_sim: UserSimConfig
     judge: JudgeConfig
+    telemetry: TelemetryConfig = Field(default_factory=TelemetryConfig)
+    cache: CacheConfig = Field(default_factory=CacheConfig)
 
     @field_validator("seeds")
     @classmethod
@@ -112,3 +151,24 @@ def load_config(path: str | Path) -> Config:
     with Path(path).open() as f:
         raw = yaml.safe_load(f)
     return Config.model_validate(raw)
+
+
+def experiment_hash(config: Config) -> str:
+    """Sha256 (first 12 hex chars) of the config, minus the `telemetry` and
+    `cache` blocks.
+
+    Stamped into every result record (as `config_hash`) so it can always be
+    traced back to the experiment definition that produced it.
+    Both excluded blocks are *operational*, not experiment-defining: a traced
+    or cached run and an untraced/uncached run of the same matrix are the same
+    experiment and must hash the same, or turning on observability/caching
+    would silently split identical results across two experiment identities.
+    The cache key already covers the full request identity (including seed),
+    so a hit can only ever replay what the identical experiment call produced
+    earlier -- caching is a rerun-cost optimization, not a new experiment.
+    Excluding both blocks also keeps this hash stable for configs written
+    before they existed — they dump identical JSON either way.
+    """
+    return hashlib.sha256(
+        config.model_dump_json(exclude={"telemetry", "cache"}).encode()
+    ).hexdigest()[:12]

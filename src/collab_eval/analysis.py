@@ -1,0 +1,290 @@
+"""Utility-vs-effort analysis: turns a results JSONL into a curve.
+
+Reads the JSONL (the source of truth — the CSV is a derived summary), aggregates
+judge scores by (task, model, effort), and renders one figure per run.
+"""
+
+import argparse
+from pathlib import Path
+from typing import get_args
+
+import matplotlib
+
+matplotlib.use("Agg")  # headless: this module must render without a display (CI, smoke run)
+
+import matplotlib.pyplot as plt  # noqa: E402
+import pandas as pd  # noqa: E402
+
+from collab_eval.types import EffortLevel, EpisodeResult  # noqa: E402
+
+EFFORT_ORDER: list[str] = list(get_args(EffortLevel))
+
+# Fixed slot order, not a generated/cycled palette: colors must stay stable and
+# validated (contrast-checked) across runs regardless of which models happen to
+# appear, and must never balloon past what's been checked for readability.
+_MODEL_COLORS = ["#2a78d6", "#1baf7a", "#eda100", "#008300"]
+# Darker ink per slot for direct line-end labels — slots 2-3 fail 3:1 contrast
+# on white at the base hue, so labels use a hand-picked darker variant instead.
+_MODEL_LABEL_COLORS = ["#1a4d8f", "#0d6b48", "#8a6400", "#005200"]
+_MODEL_MARKERS = ["o", "s", "^", "D"]
+
+_GRID_COLOR = "#e1e0d9"
+_SPINE_COLOR = "#c3c2b7"
+_TICK_LABEL_COLOR = "#898781"
+_INK_COLOR = "#0b0b0b"
+
+_DODGE_SPREAD = 0.12  # total horizontal spread across models, centered on the tick
+_SEED_DODGE_STEP = 0.02  # per-seed offset within a model's cluster
+
+
+def load_results(path: Path) -> list[EpisodeResult]:
+    with path.open() as f:
+        episodes = [EpisodeResult.model_validate_json(line) for line in f if line.strip()]
+    if not episodes:
+        raise ValueError(f"No episodes in {path} — nothing to analyze")
+    return episodes
+
+
+def utility_by_effort(results: list[EpisodeResult]) -> pd.DataFrame:
+    rows = [
+        {
+            "task": r.task,
+            "model": r.model,
+            "effort": r.effort,
+            "score": r.judge.score,
+        }
+        for r in results
+    ]
+    df = pd.DataFrame(rows)
+    df["effort"] = pd.Categorical(df["effort"], categories=EFFORT_ORDER, ordered=True)
+    grouped = (
+        df.groupby(["task", "model", "effort"], observed=True)["score"]
+        .agg(mean_score="mean", n="count")
+        .reset_index()
+    )
+    grouped["n"] = grouped["n"].astype(int)
+    grouped = grouped.sort_values(["task", "model", "effort"]).reset_index(drop=True)
+    return grouped[["task", "model", "effort", "mean_score", "n"]]
+
+
+def effort_manipulation(results: list[EpisodeResult]) -> pd.DataFrame:
+    """Summarize simulated-user behavior per (task, effort), pooled across models/seeds.
+
+    A rising or flat utility curve is ambiguous on its own: it could reflect a
+    true null, or it could mean the effort levels never actually produced
+    distinguishable user behavior (treatment failure). This does not judge
+    separation — it just computes the numbers a reader needs to check it.
+    """
+    rows = []
+    for r in results:
+        sim_turns = [t for t in r.turns if t.actor == "user_sim"]
+        user_turns = [t for t in sim_turns if t.message is not None]
+        words = sum(len(t.message.content.split()) for t in user_turns)
+        rows.append(
+            {
+                "task": r.task,
+                "effort": r.effort,
+                "n_user_turns": len(user_turns),
+                "words": words,
+                "sim_output_tokens": sum(t.usage.output_tokens for t in sim_turns),
+            }
+        )
+    df = pd.DataFrame(rows)
+    df["effort"] = pd.Categorical(df["effort"], categories=EFFORT_ORDER, ordered=True)
+
+    grouped = (
+        df.groupby(["task", "effort"], observed=True)
+        .agg(
+            n_episodes=("n_user_turns", "count"),
+            mean_user_turns=("n_user_turns", "mean"),
+            total_words=("words", "sum"),
+            total_user_messages=("n_user_turns", "sum"),
+            mean_sim_output_tokens=("sim_output_tokens", "mean"),
+        )
+        .reset_index()
+    )
+    # Zero user messages in a cell yields NaN, not a divide-by-zero error:
+    # there is nothing to average, and that's a fact worth surfacing, not hiding.
+    grouped["mean_words_per_user_message"] = grouped["total_words"] / grouped[
+        "total_user_messages"
+    ].replace(0, float("nan"))
+    grouped["n_episodes"] = grouped["n_episodes"].astype(int)
+    grouped = grouped.sort_values(["task", "effort"]).reset_index(drop=True)
+    return grouped[
+        [
+            "task",
+            "effort",
+            "n_episodes",
+            "mean_user_turns",
+            "mean_words_per_user_message",
+            "mean_sim_output_tokens",
+        ]
+    ]
+
+
+def _model_order(results: list[EpisodeResult]) -> list[str]:
+    order: list[str] = []
+    for r in results:
+        if r.model not in order:
+            order.append(r.model)
+    return order
+
+
+def plot_utility_vs_effort(results: list[EpisodeResult], out_path: Path) -> Path:
+    models = _model_order(results)
+    if len(models) > len(_MODEL_COLORS):
+        raise ValueError(
+            f"plot_utility_vs_effort supports at most {len(_MODEL_COLORS)} models "
+            f"(got {len(models)}); reduce the model count in the config."
+        )
+    model_color = dict(zip(models, _MODEL_COLORS, strict=False))
+    model_label_color = dict(zip(models, _MODEL_LABEL_COLORS, strict=False))
+    model_marker = dict(zip(models, _MODEL_MARKERS, strict=False))
+    n_models = len(models)
+
+    df = utility_by_effort(results)
+    seed_lookup: dict[tuple[str, str, str], list[tuple[int, float]]] = {}
+    for r in results:
+        seed_lookup.setdefault((r.task, r.model, r.effort), []).append((r.seed, r.judge.score))
+
+    tasks = sorted(df["task"].unique())
+    run_name = results[0].run_name
+
+    fig, axes = plt.subplots(1, len(tasks), figsize=(6 * len(tasks), 5), sharey=True)
+    if len(tasks) == 1:
+        axes = [axes]
+
+    x_positions = range(len(EFFORT_ORDER))
+    # Offsets center the model cluster on each tick; a single model gets 0 offset.
+    if n_models > 1:
+        model_offsets = {
+            model: (i - (n_models - 1) / 2) * (_DODGE_SPREAD / max(n_models - 1, 1))
+            for i, model in enumerate(models)
+        }
+    else:
+        model_offsets = {models[0]: 0.0} if models else {}
+
+    for ax, task in zip(axes, tasks, strict=True):
+        task_df = df[df["task"] == task]
+        for model in models:
+            m_df = task_df[task_df["model"] == model].sort_values("effort")
+            if m_df.empty:
+                continue
+            color = model_color[model]
+            offset = model_offsets[model]
+            xs = [EFFORT_ORDER.index(e) + offset for e in m_df["effort"]]
+            ys = list(m_df["mean_score"])
+
+            for x, effort in zip(xs, m_df["effort"], strict=True):
+                seeds = sorted(seed_lookup.get((task, model, effort), []))
+                n_seeds = len(seeds)
+                for rank, (_seed, score) in enumerate(seeds):
+                    seed_offset = (rank - (n_seeds - 1) / 2) * _SEED_DODGE_STEP
+                    # Faint individual replicates, not error bars: at N=2-5 seeds
+                    # an error bar overstates precision the sample doesn't have.
+                    ax.plot(
+                        x + seed_offset,
+                        score,
+                        marker=model_marker[model],
+                        markersize=4,
+                        color=color,
+                        alpha=0.35,
+                        linestyle="none",
+                    )
+
+            ax.plot(
+                xs,
+                ys,
+                marker=model_marker[model],
+                markersize=7,
+                linewidth=2,
+                color=color,
+                label=model,
+            )
+            ax.annotate(
+                model,
+                xy=(xs[-1], ys[-1]),
+                xytext=(6, 0),
+                textcoords="offset points",
+                color=model_label_color[model],
+                fontsize=9,
+                va="center",
+            )
+
+        ax.set_xticks(list(x_positions))
+        ax.set_xticklabels(EFFORT_ORDER)
+        ax.set_xlim(-0.5, len(EFFORT_ORDER) - 0.5)
+        ax.set_ylim(-0.05, 1.05)
+        ax.set_xlabel("user effort", color=_TICK_LABEL_COLOR)
+        ax.set_title(task, color=_INK_COLOR)
+
+        ax.yaxis.grid(True, color=_GRID_COLOR)
+        ax.xaxis.grid(False)
+        ax.set_axisbelow(True)
+        for spine in ("top", "right"):
+            ax.spines[spine].set_visible(False)
+        for spine in ("left", "bottom"):
+            ax.spines[spine].set_color(_SPINE_COLOR)
+        ax.tick_params(colors=_TICK_LABEL_COLOR)
+
+    axes[0].set_ylabel("utility (judge met-fraction)", color=_TICK_LABEL_COLOR)
+
+    # Three stacked bands with reserved room — suptitle, legend, axes — or the
+    # default anchors superimpose the first two at the figure's top edge.
+    fig.subplots_adjust(top=0.82)
+    if n_models >= 2:
+        # Explicit handles: only the mean lines carry labels, and without them
+        # fig.legend pairs the label list with the first artists it finds (the
+        # unlabeled seed dots), giving every entry the first model's swatch.
+        handles_by_label: dict[str, object] = {}
+        for ax in axes:
+            for handle, label in zip(*ax.get_legend_handles_labels(), strict=True):
+                handles_by_label.setdefault(label, handle)
+        fig.legend(
+            handles=[handles_by_label[m] for m in models if m in handles_by_label],
+            loc="upper center",
+            ncol=n_models,
+            frameon=False,
+            bbox_to_anchor=(0.5, 0.93),
+        )
+    fig.suptitle(f"utility vs. effort — {run_name}", color=_INK_COLOR, y=0.98)
+    fig.savefig(out_path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    return out_path
+
+
+def main(argv: list[str] | None = None) -> None:
+    parser = argparse.ArgumentParser(
+        description="Plot utility vs. user effort from a results JSONL."
+    )
+    parser.add_argument("--results", required=True, type=Path, help="Path to a results JSONL")
+    parser.add_argument(
+        "--out",
+        type=Path,
+        help="Output PNG path (default: <results parent>/<results stem>_utility_vs_effort.png)",
+    )
+    args = parser.parse_args(argv)
+
+    out_path = args.out or (args.results.parent / f"{args.results.stem}_utility_vs_effort.png")
+
+    episodes = load_results(args.results)
+    df = utility_by_effort(episodes)
+    for row in df.itertuples(index=False):
+        print(f"  {row.task}/{row.model}/{row.effort}: mean_score={row.mean_score:.3f} n={row.n}")
+
+    print("effort manipulation check (sim behavior per effort):")
+    manip_df = effort_manipulation(episodes)
+    for row in manip_df.itertuples(index=False):
+        print(
+            f"  {row.task}/{row.effort}: n_episodes={row.n_episodes} "
+            f"mean_user_turns={row.mean_user_turns:.2f} "
+            f"mean_words_per_user_message={row.mean_words_per_user_message:.1f} "
+            f"mean_sim_output_tokens={row.mean_sim_output_tokens:.1f}"
+        )
+
+    plot_utility_vs_effort(episodes, out_path)
+    print(f"wrote {out_path}")
+
+
+if __name__ == "__main__":
+    main()

@@ -7,32 +7,25 @@ episode stop conditions, and replay determinism).
 
 import csv
 from collections.abc import Sequence
-from pathlib import Path
 
 import yaml
 
 from collab_eval.config import load_config
-from collab_eval.judge import MockJudge
-from collab_eval.models.base import AgentModel
+from collab_eval.judge import Judge, MockJudge
 from collab_eval.models.mock import MockModel
 from collab_eval.runner import run_episode, run_matrix
+from collab_eval.tasks.base import Task
 from collab_eval.tasks.toy import ToyTask
-from collab_eval.types import EpisodeResult, Message, ModelResponse, Usage
+from collab_eval.types import EpisodeResult, JudgeScore, Message, Usage
 from collab_eval.user_sim import STOP_SENTINEL, UserSimulator
-
-REPO_ROOT = Path(__file__).resolve().parents[1]
-SMOKE_YAML = REPO_ROOT / "configs" / "smoke.yaml"
-
-# smoke.yaml: 1 task x 1 model x 3 effort levels x 2 seeds
-EXPECTED_EPISODES = 6
+from conftest import EXPECTED_EPISODES, SMOKE_YAML, ScriptedModel
 
 
-def test_matrix_writes_jsonl_that_round_trips(tmp_path):
-    cfg = load_config(SMOKE_YAML)
-    results = run_matrix(cfg, output_dir=tmp_path)
+def test_matrix_writes_jsonl_that_round_trips(smoke_run):
+    results = smoke_run.results
     assert len(results) == EXPECTED_EPISODES
 
-    lines = (tmp_path / "smoke.jsonl").read_text().splitlines()
+    lines = (smoke_run.output_dir / "smoke.jsonl").read_text().splitlines()
     assert len(lines) == EXPECTED_EPISODES
     parsed = [EpisodeResult.model_validate_json(line) for line in lines]
 
@@ -43,11 +36,8 @@ def test_matrix_writes_jsonl_that_round_trips(tmp_path):
     assert {r.seed for r in parsed} == {0, 1}
 
 
-def test_matrix_writes_flat_csv_summary(tmp_path):
-    cfg = load_config(SMOKE_YAML)
-    run_matrix(cfg, output_dir=tmp_path)
-
-    with (tmp_path / "smoke.csv").open() as f:
+def test_matrix_writes_flat_csv_summary(smoke_run):
+    with (smoke_run.output_dir / "smoke.csv").open() as f:
         rows = list(csv.DictReader(f))
     assert len(rows) == EXPECTED_EPISODES
     expected_cols = {
@@ -76,25 +66,28 @@ def test_matrix_writes_flat_csv_summary(tmp_path):
         assert float(row["latency_s"]) > 0
 
 
-def test_transcript_structure_turn_cap_and_totals(tmp_path):
+def test_transcript_structure_turn_cap_and_totals(smoke_run):
     cfg = load_config(SMOKE_YAML)
-    results = run_matrix(cfg, output_dir=tmp_path)
-
-    for ep in results:
+    for ep in smoke_run.results:
         roles = [m.role for m in ep.transcript]
         # Opens with the task framing and the (seeded) user goal…
         assert roles[:2] == ["system", "user"]
-        # …then strictly alternates assistant/user: multi-turn, not a monologue.
-        for i, role in enumerate(roles[2:]):
+        # …then strictly alternates assistant/user (the in-loop turns), followed
+        # by the consolidation pair: one more user (elicitation) + assistant
+        # (final artifact) appended after the loop ends, cap or no cap.
+        for i, role in enumerate(roles[2:-2]):
             assert role == ("assistant" if i % 2 == 0 else "user")
+        assert roles[-2:] == ["user", "assistant"]
 
         # The mock user-sim never volunteers to stop, so the runner's hard cap
-        # must be what ends the episode.
+        # must be what ends the in-loop turns; +1 for the consolidation call,
+        # which sits outside the cap by design.
         n_agent = sum(1 for r in roles if r == "assistant")
-        assert n_agent == cfg.max_turns
+        assert n_agent == cfg.max_turns + 1
 
-        # Totals are the sum of every logged call (agent + user-sim + judge):
-        # cost accounting must have no untracked calls.
+        # Totals are the sum of every logged call (agent + user-sim + judge),
+        # including the consolidation call: cost accounting must have no
+        # untracked calls.
         recomputed = sum((t.usage for t in ep.turns), Usage.zero()) + ep.judge.usage
         assert ep.totals == recomputed
 
@@ -155,28 +148,97 @@ def test_rerun_is_deterministic(tmp_path):
         assert ep_a.totals == ep_b.totals
 
 
-class _AlwaysStopsModel(AgentModel):
-    """Stub user-sim backend that immediately signals it has what it needs."""
-
-    name = "stub:always-stops"
-
-    def next_turn(self, conversation: Sequence[Message]) -> ModelResponse:
-        return ModelResponse(
-            message=Message(role="assistant", content=f"Looks good, thanks. {STOP_SENTINEL}"),
-            usage=Usage(input_tokens=1, output_tokens=1, cost_usd=1e-6, latency_s=0.01),
-        )
-
-
 def test_user_sim_stop_signal_ends_episode_early():
     task = ToyTask()
     agent = MockModel(model="mock-agent", seed=0)
-    user_sim = UserSimulator(model=_AlwaysStopsModel(), effort="passive")
+    user_sim = UserSimulator(
+        model=ScriptedModel(f"Looks good, thanks. {STOP_SENTINEL}"),
+        effort="passive",
+        user_context=task.user_context(0),
+    )
     judge = MockJudge(model="mock-judge", rubric_version="v0")
 
     ep = run_episode(task=task, agent=agent, user_sim=user_sim, judge=judge, seed=0, max_turns=5)
 
-    # One agent turn, then the user is satisfied — well under the cap.
-    assert sum(1 for m in ep.transcript if m.role == "assistant") == 1
+    # One in-loop agent turn, then the user is satisfied — well under the cap
+    # — plus the consolidation call, which runs regardless of how the loop ended.
+    assert sum(1 for m in ep.transcript if m.role == "assistant") == 2
     # The stop signal itself is not a conversational turn: it must not leak
     # sentinel text into the transcript the judge scores.
     assert all(STOP_SENTINEL not in m.content for m in ep.transcript)
+    # Ends with the elicitation + final artifact, as the judge contract requires.
+    assert [m.role for m in ep.transcript[-2:]] == ["user", "assistant"]
+
+
+# --- channel isolation: user_context / judge_context are private per-consumer
+# state, not conversation. A leak here would let the agent see the sim's
+# hidden requirements (defeating the underspecified-goal premise), or let the
+# judge's ground truth reach the agent or sim (contaminating the very
+# effort-vs-utility comparison the harness measures).
+
+_SIM_CANARY = "CANARY_USER_CTX_7f3a"
+_JUDGE_CANARY = "CANARY_JUDGE_CTX_9b1e"
+
+
+class _CanaryTask(Task):
+    name = "canary"
+
+    def agent_system_prompt(self) -> str:
+        return "You are a helpful planning assistant."
+
+    def initial_goal(self, seed: int) -> str:
+        return "Help me plan something."
+
+    def user_context(self, seed: int) -> str:
+        return _SIM_CANARY
+
+    def judge_context(self, seed: int) -> str:
+        return _JUDGE_CANARY
+
+    def judge_criteria(self, seed: int) -> list[str]:
+        return [_JUDGE_CANARY]
+
+
+class _RecordingJudge(Judge):
+    """Scores nothing meaningful — records the judge_context it was given so
+    the test can assert the judge canary reached only the judge."""
+
+    rubric_version = "v0"
+    model = "stub-judge"
+
+    def __init__(self):
+        self.received_context: str | None = None
+
+    def score(self, task: Task, transcript: Sequence[Message], seed: int) -> JudgeScore:
+        self.received_context = task.judge_context(seed)
+        return JudgeScore(
+            score=0.5,
+            rationale="ok",
+            rubric_version=self.rubric_version,
+            usage=Usage(input_tokens=1, output_tokens=1, cost_usd=1e-6, latency_s=0.01),
+        )
+
+
+def test_user_context_and_judge_context_never_cross_channels():
+    task = _CanaryTask()
+    seed = 0
+    agent = ScriptedModel("a proposal")
+    sim_backend = ScriptedModel(STOP_SENTINEL)
+    user_sim = UserSimulator(
+        model=sim_backend, effort="passive", user_context=task.user_context(seed)
+    )
+    judge = _RecordingJudge()
+
+    ep = run_episode(task=task, agent=agent, user_sim=user_sim, judge=judge, seed=seed, max_turns=5)
+
+    assert any(_SIM_CANARY in m.content for m in sim_backend.calls[0])
+    for conversation in agent.calls:
+        assert all(_SIM_CANARY not in m.content for m in conversation)
+    assert all(_SIM_CANARY not in m.content for m in ep.transcript)
+
+    assert judge.received_context == _JUDGE_CANARY
+    for conversation in [*agent.calls, *sim_backend.calls]:
+        assert all(_JUDGE_CANARY not in m.content for m in conversation)
+
+    # Auditability: the episode record carries the user_context it ran with.
+    assert ep.user_context == task.user_context(seed)

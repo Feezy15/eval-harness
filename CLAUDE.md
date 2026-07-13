@@ -12,6 +12,9 @@ Code quality, reproducibility, tests, and a clean README matter as much as resul
 ## Working style
 
 - **Teach through comments/PRs:** explain the "why" behind non-trivial ML/eval choices, not just the "what."
+- **Comment style — why, not what:** comments/docstrings state constraints and rationale the code can't
+  show; never narrate what the next line does. No decision/milestone-number citations in code — those
+  live in `docs/architecture.md` and go stale in source.
 - The maintainer owns architecture and design decisions; the assistant handles routine implementation.
 - Prefer LLM APIs over training anything.
 
@@ -44,6 +47,7 @@ Code quality, reproducibility, tests, and a clean README matter as much as resul
 - Tests: `uv run pytest`
 - Lint/format: `uv run ruff check .` and `uv run ruff format .`
 - Plots (M1+): `uv run python -m collab_eval.analysis --results results/<run>.jsonl`
+- Judge validation (gate before any real run): `uv run python -m collab_eval.judge_validation --config configs/experiment.yaml --golden golden/trip_planning.yaml`
 - Docker (M3): `docker build -t collab-eval . && docker run --rm collab-eval ...`
 - (Keep this list updated as commands solidify.)
 
@@ -68,6 +72,14 @@ and produce slop that's hard to recover from.
 Generation is the fast part; verification is the rate-limiting part, and that's where the bugs hide. Treat it as the bulk of the work, not an afterthought.
 
 - **Tests first where practical (TDD):** Write the test file, **run** `pytest` **and confirm it red-bars**, then write the implementation to make it pass. Writing tests and implementation in the same batch (parallel writes, same message) does **not** satisfy this requirement; it skips the red bar, which is the only proof that the test is genuinely testing something and not accidentally passing against an already written implementation. New tests should fail, then pass incrementally (unit → integration → end-to-end; don't over-index on unit tests alone).
+- **Test economy — one behavior, one test:** before writing a test, search `tests/` for one that already
+  covers the behavior; **prefer extending or parametrizing an existing test over adding a new one.** Don't
+  add tests that re-cover the same behavior through a different entry point, and don't test the same logic
+  at multiple layers (if a unit test pins the logic, the integration test only needs to prove the wiring).
+  Delete tests made redundant by refactors instead of keeping both. New test *files* only for genuinely new
+  modules. TDD's red bar applies to modified tests too: the updated test must fail before the implementation
+  change. When in doubt whether a scenario deserves its own test, ask — half the value of the suite is that
+  it stays readable.
 - **Green gate before "done":** run `pytest` (on the mock model) plus lint/format (ruff/black) and type checks
 before considering any task complete.
 - **Generated code is a draft, not a commit.** Every atomic change gets reviewed; prove it works rather than
@@ -104,5 +116,15 @@ config), episode loop + matrix runner (agent temperature recorded per episode), 
 keyless CI (pulled forward from M3). Design decisions + gaps: `docs/architecture.md` (see 10–12 for
 the review-hardening round).
 
-**Next: M1** (trip_planning task, OpenAI + Anthropic wrappers, real effort prompts, LLM judge + rubric v1,
-utility-vs-effort plot). See `docs/PROJECT.md` for M0–M4.
+**M1 complete on `m1-mvp`** (PR to `main` pending). DoD met 2026-07-12: 24 real episodes
+(haiku-4-5 + gpt-5.4-mini, $1.80) show utility rising passive → moderate then plateauing — figure
+and note in the README's "First results". Chunk 7 landed: judge repair-retry (bounded,
+conversation-extending — decision 20), the effort-manipulation check in `analysis.py` (computes,
+never asserts — decision 21; confirmed 23/141/286 words/message on the real run), golden-set
+judge validation as a CLI gate (`golden/`, 21 human-labeled artifacts, 153/153 after one fixture
+triage — decision 22), and `experiment.yaml`/`pilot.yaml` behind spend-guardrail tests. Pricing
+freshness is procedural: verify the pages cited in `models/pricing.py` and bump
+`PRICING_VERSION` before any paid run. 137 tests green.
+
+**Next:** M2 — cost/latency-vs-utility curves (`utility-per-dollar`, `utility-per-second`) and a
+second task. See `docs/PROJECT.md` for M0-M4.

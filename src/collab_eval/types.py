@@ -56,6 +56,15 @@ class ModelResponse(BaseModel):
     usage: Usage
 
 
+class CriterionVerdict(BaseModel):
+    """One checklist item's boolean verdict plus the judge's stated reasoning
+    for it — the per-criterion detail golden-set validation compares against
+    hand-labeled expectations, one entry per `task.judge_criteria` item."""
+
+    met: bool
+    reasoning: str
+
+
 class JudgeScore(BaseModel):
     score: float = Field(ge=0.0, le=1.0)  # normalized so scores are comparable across tasks
     rationale: str
@@ -64,6 +73,7 @@ class JudgeScore(BaseModel):
     # numbers into one plot.
     rubric_version: str
     usage: Usage
+    criteria: list[CriterionVerdict] | None = None
 
 
 class TurnRecord(BaseModel):
@@ -96,9 +106,23 @@ class EpisodeResult(BaseModel):
     temperature: float
     effort: EffortLevel
     seed: int
+    # The sim's private requirements, logged for auditability
+    user_context: str
     transcript: list[Message]
     turns: list[TurnRecord]
     totals: Usage  # summed over every logged call: agent + user-sim + judge
     judge: JudgeScore
     started_at: datetime
     config_hash: str
+    # Fingerprint of the prompt files (the instrument definition). Scores are
+    # only comparable under identical prompt text, and a content hash — unlike
+    # a hand-bumped version string — cannot drift from the text it describes.
+    prompts_hash: str
+    # The pricing table snapshot cost_usd was computed under. A cost figure is
+    # only meaningful next to the rates that produced it; stamping the version
+    # (not the whole table) keeps records small while still making a later
+    # pricing update visible in old records instead of silently reinterpreted.
+    pricing_version: str | None = None
+    # None when telemetry is off (a no-op span has no valid trace context).
+    # JSONL-only: the CSV summary columns are deliberately unchanged.
+    trace_id: str | None = None

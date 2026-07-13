@@ -28,10 +28,35 @@ level and plots the curves across models. Concept from
 - Produces **utility-vs-effort** and **cost/latency-vs-utility** curves across models.
 - Runs end-to-end on a **mock model** with zero API cost for development and CI.
 
-## Results
+## First results (M1)
 
-_Coming soon — utility-vs-effort and cost-vs-utility plots + headline takeaways will be added here after the
-first full run._
+24 episodes: `trip_planning` × {`claude-haiku-4-5`, `gpt-5.4-mini`} × {passive, moderate,
+active_steering} × 4 seeded scenarios, with `gpt-5.4-mini` as the simulated user and a
+`claude-haiku-4-5` checklist judge (rubric v1). Matrix cost: **$1.80** (responses cached; reruns
+are free).
+
+![Utility vs. user effort for two models on trip_planning](docs/figures/experiment_utility_vs_effort.png)
+
+- **Utility rises with involvement, then plateaus.** Both models gain sharply from passive →
+  moderate (+0.16 and +0.24 met-fraction), then flatten (haiku: 0.89 → 0.89) or dip within seed
+  spread (gpt: 0.93 → 0.86). On this task, user effort beyond "moderate" bought no additional
+  requirement coverage — the direction *Completion ≠ Collaboration* predicts: agents don't
+  convert sustained engagement into proportional utility.
+- **Where agents underperform:** passive episodes leave hidden requirements unsurfaced — per-seed
+  scores drop to 0.50–0.57 when the agent fails to elicit what the user didn't volunteer. The
+  plateau means the remedy (more user effort) stops working early.
+- **The treatment was real (manipulation check):** simulated-user verbosity scaled 23 → 141 → 286
+  words per message across effort levels (142 → 827 → 2,085 sim output tokens per episode), and
+  active-steering users almost never ended the episode voluntarily (1/8, vs 6/8 at the other
+  levels) — they steered until the turn cap.
+- **The judge is a validated instrument:** before the run it passed a 21-artifact, human-labeled
+  golden set at 153/153 per-criterion agreement — including two prompt-injection probes, a
+  verbosity confound, and minimal pairs isolating single criteria
+  (`golden/`, `python -m collab_eval.judge_validation`).
+
+Read these as directional at this scale: 4 scenarios per cell (seeds select scenarios, so dots mix
+scenario difficulty with sampling variance), one task, one judge model. Cost/latency-vs-utility
+curves are next (M2).
 
 ## Quickstart
 
@@ -45,10 +70,13 @@ uv run python -m collab_eval.runner --config configs/smoke.yaml
 # Tests + lint (no keys, no network)
 uv run pytest && uv run ruff check .
 
-# Real run (coming in M1 — set OPENAI_API_KEY / ANTHROPIC_API_KEY first)
+# Real run — set OPENAI_API_KEY / ANTHROPIC_API_KEY first, then validate the
+# judge against the golden set before spending on the matrix
+uv run python -m collab_eval.judge_validation --config configs/experiment.yaml --golden golden/trip_planning.yaml
 uv run python -m collab_eval.runner --config configs/experiment.yaml
 
-# Render plots from a results file (coming in M1)
+# Render the utility-vs-effort plot from a results file
+# (writes results/<run>_utility_vs_effort.png; override with --out)
 uv run python -m collab_eval.analysis --results results/<run>.jsonl
 ```
 
@@ -78,8 +106,13 @@ and [`docs/PROJECT.md`](docs/PROJECT.md) for the research spec and milestones.
 
 ## Limitations
 
-Small sample sizes, LLM-as-judge bias, the realism of the simulated user, and prompt sensitivity all affect the
-results. Treat the curves as directional, not definitive. See the writeup for details.
+Small sample sizes (4 scenarios per cell; seeds select scenarios, so replicate spread mixes scenario
+difficulty with sampling variance), LLM-as-judge bias (one judge model, sharing a family with one
+agent — mitigated but not eliminated by the validated checklist), the realism of the simulated user
+(one sim model; scenarios lack some real-world context like a home city, which occasionally makes
+the sim deflect awkwardly), and prompt sensitivity all affect the results. Recorded dollar costs
+are list-price upper bounds as of each record's `pricing_version` (the table is hand-verified
+before paid runs, not fetched live). Treat the curves as directional, not definitive.
 
 ## References
 

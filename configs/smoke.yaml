@@ -7,6 +7,7 @@ max_turns: 3
 
 tasks:
   - name: toy
+  - name: trip_planning
 
 models:
   - provider: mock
@@ -23,3 +24,9 @@ judge:
   provider: mock
   model: mock-judge
   rubric_version: v0
+
+telemetry:
+  enabled: false  # observability knob, not an experiment knob — excluded from config_hash; CI stays quiet
+
+cache:
+  enabled: false

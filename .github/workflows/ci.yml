@@ -24,8 +24,12 @@ jobs:
       - run: uv sync --frozen
       - run: uv run ruff check .
       - run: uv run ruff format --check .
-      - run: uv run pytest -q
-      # The literal quickstart command, as an end-to-end gate: exercises the CLI
-      # entrypoint (argparse -> config load -> matrix -> result files) that the
-      # unit suite doesn't cover.
+      # Coverage is report-only (no --cov-fail-under): the table in the log informs
+      # PR review; the tests themselves are the gate.
+      - run: uv run pytest -q --cov --cov-report=term-missing
+      # The literal quickstart commands, as an end-to-end gate: exercise the CLI
+      # entrypoints (argparse -> config load -> matrix -> result files -> plot)
+      # that the unit suite doesn't cover. The analysis step consumes the smoke
+      # step's JSONL, so together they prove the full produce-then-analyze chain.
       - run: uv run python -m collab_eval.runner --config configs/smoke.yaml
+      - run: uv run python -m collab_eval.analysis --results results/smoke.jsonl
