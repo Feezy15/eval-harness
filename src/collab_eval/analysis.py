@@ -229,10 +229,25 @@ def plot_utility_vs_effort(results: list[EpisodeResult], out_path: Path) -> Path
 
     axes[0].set_ylabel("utility (judge met-fraction)", color=_TICK_LABEL_COLOR)
 
+    # Three stacked bands with reserved room — suptitle, legend, axes — or the
+    # default anchors superimpose the first two at the figure's top edge.
+    fig.subplots_adjust(top=0.82)
     if n_models >= 2:
-        fig.legend(models, loc="upper center", ncol=n_models, frameon=False)
-
-    fig.suptitle(f"utility vs. effort — {run_name}", color=_INK_COLOR)
+        # Explicit handles: only the mean lines carry labels, and without them
+        # fig.legend pairs the label list with the first artists it finds (the
+        # unlabeled seed dots), giving every entry the first model's swatch.
+        handles_by_label: dict[str, object] = {}
+        for ax in axes:
+            for handle, label in zip(*ax.get_legend_handles_labels(), strict=True):
+                handles_by_label.setdefault(label, handle)
+        fig.legend(
+            handles=[handles_by_label[m] for m in models if m in handles_by_label],
+            loc="upper center",
+            ncol=n_models,
+            frameon=False,
+            bbox_to_anchor=(0.5, 0.93),
+        )
+    fig.suptitle(f"utility vs. effort — {run_name}", color=_INK_COLOR, y=0.98)
     fig.savefig(out_path, dpi=150, bbox_inches="tight")
     plt.close(fig)
     return out_path

@@ -99,27 +99,23 @@ Repo skeleton, config loading, interfaces defined, a **mock model** so the loop 
   matrix cells and unique model labels are episode identity; keyless CI pulled forward from M3.
   See `docs/architecture.md` for what was built and why.
 
-### 🔜 M1 — MVP (reproduce the core idea)
+### ✅ M1 — MVP (reproduce the core idea)
 1 real task (`trip_planning`), 2 models, 3 effort levels, LLM-as-judge rubric; produce the **utility-vs-effort** plot.
 - **DoD:** a plot showing utility rising with involvement, and a note on where agents plateau/underperform.
-- **Status (2026-07-10, in progress on `m1-mvp`):** chunk 1 (prompt files + content fingerprint,
-  bookend stop-sentinel), chunk 2 (OTel span layer over run → episode → turn/LLM-call; GenAI
-  semconv; JSONL stays the analysis source of truth; `experiment_hash` blind to telemetry —
-  decision 14), chunk 3 (OpenAI + Anthropic wrappers, snapshot-dated pricing table with
-  fail-loud unknown models, disk response cache as a composition wrapper excluded from experiment
-  identity — decision 15), chunk 4 (`trip_planning` task; seeded `Task.user_context` as the
-  sim's private channel; judge scores full ground truth via `judge_context(seed)`; canary
-  leak tests make channel isolation a CI invariant — decision 17), and chunk 5 (real `LLMJudge`
-  over a deterministic per-scenario checklist, `Task.judge_criteria`; CoT-before-verdict, code
-  computes the met-fraction score; a consolidation turn after the loop scores one restated
-  artifact instead of the raw last turn; `build_judge` wires the response cache through the judge
-  — decision 18), and chunk 6 (`analysis.py`: JSONL → per-cell aggregation → the utility-vs-effort
-  figure, mean line per model + per-seed dots, exercised end-to-end in CI on smoke output —
-  decision 19) are done; 123 tests green. Remaining chunk: (7) `experiment.yaml` + the real run
-  with a manipulation check that effort levels are behaviorally distinct, plus the golden-set
-  judge validation deferred from chunk 5.
+- **Status (2026-07-12): DoD met** — see the README's "First results" for the figure and note.
+  24 real episodes (`claude-haiku-4-5` + `gpt-5.4-mini` agents, `gpt-5.4-mini` sim,
+  `claude-haiku-4-5` checklist judge, $1.80): utility rises passive → moderate for both models
+  (+0.16/+0.24 met-fraction) then plateaus — extra effort past moderate bought no coverage.
+  Manipulation check confirms behaviorally distinct effort levels (23/141/286 words per user
+  message); the judge passed a 21-artifact human-labeled golden set 148/148 (incl. injection
+  probes) before any matrix spend. Infrastructure landed across chunks 1–7: prompt fingerprints,
+  OTel span layer, real provider wrappers + versioned pricing + response cache, the
+  `trip_planning` task with isolated context channels, the checklist `LLMJudge` with
+  consolidation turn and bounded repair-retry, `analysis.py` (figure + manipulation summary),
+  and `judge_validation` as a pre-run CLI gate. 137 tests green; decisions 13–22 in
+  `docs/architecture.md`.
 
-### ⬜ M2 — The extension (cost/latency-vs-utility)
+### 🔜 M2 — The extension (cost/latency-vs-utility)
 Add token/cost/latency logging and render **utility-per-dollar** and **utility-per-second** curves; add a 2nd
 task and/or an open-weight model.
 - **DoD:** a cost-vs-utility plot (not in the paper) plus a short written takeaway.

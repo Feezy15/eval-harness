@@ -47,6 +47,7 @@ Code quality, reproducibility, tests, and a clean README matter as much as resul
 - Tests: `uv run pytest`
 - Lint/format: `uv run ruff check .` and `uv run ruff format .`
 - Plots (M1+): `uv run python -m collab_eval.analysis --results results/<run>.jsonl`
+- Judge validation (gate before any real run): `uv run python -m collab_eval.judge_validation --config configs/experiment.yaml --golden golden/trip_planning.yaml`
 - Docker (M3): `docker build -t collab-eval . && docker run --rm collab-eval ...`
 - (Keep this list updated as commands solidify.)
 
@@ -115,13 +116,15 @@ config), episode loop + matrix runner (agent temperature recorded per episode), 
 keyless CI (pulled forward from M3). Design decisions + gaps: `docs/architecture.md` (see 10–12 for
 the review-hardening round).
 
-**M1 in progress on `m1-mvp`** (chunks 1-6 of 7 done; see `docs/PROJECT.md` for the chunk list and
-`docs/architecture.md` decisions 14-19). Chunk 6 landed `analysis.py`: loads the results JSONL
-(source of truth), aggregates `judge.score` per (task, model, effort) with effort in treatment
-order, and renders the utility-vs-effort figure (subplot per task, mean line per model, individual
-seed scores as faint dots — raw replicates, not error bars, at this N). CLI:
-`uv run python -m collab_eval.analysis --results results/<run>.jsonl`; CI runs it on smoke output
-after the smoke step. pandas + matplotlib added. 123 tests green.
+**M1 complete on `m1-mvp`** (PR to `main` pending). DoD met 2026-07-12: 24 real episodes
+(haiku-4-5 + gpt-5.4-mini, $1.80) show utility rising passive → moderate then plateauing — figure
+and note in the README's "First results". Chunk 7 landed: judge repair-retry (bounded,
+conversation-extending — decision 20), the effort-manipulation check in `analysis.py` (computes,
+never asserts — decision 21; confirmed 23/141/286 words/message on the real run), golden-set
+judge validation as a CLI gate (`golden/`, 21 human-labeled artifacts, 148/148 after one fixture
+triage — decision 22), and `experiment.yaml`/`pilot.yaml` behind spend-guardrail tests. Pricing
+freshness is procedural: verify the pages cited in `models/pricing.py` and bump
+`PRICING_VERSION` before any paid run. 137 tests green.
 
-**Next:** chunk 7 (`experiment.yaml` real run, manipulation check that effort levels are
-behaviorally distinct, golden-set judge validation). See `docs/PROJECT.md` for M0-M4.
+**Next:** M2 — cost/latency-vs-utility curves (`utility-per-dollar`, `utility-per-second`) and a
+second task. See `docs/PROJECT.md` for M0-M4.

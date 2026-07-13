@@ -79,7 +79,7 @@ Scaffold and plumbing (milestone M0), fully runnable with **no API keys and no n
 - `MockModel` / `MockJudge` for deterministic zero-cost runs
 - Toolchain: uv + Python 3.12 (pinned), pytest, ruff, keyless GitHub Actions CI
 
-M1 in progress, landed so far:
+M1 complete (first real results 2026-07-12; see the README's "First results"):
 
 - Effort prompts and the judge rubric as fingerprinted instrument files (`prompts_hash` on every
   record; decision 13)
@@ -94,16 +94,20 @@ M1 in progress, landed so far:
 - The real `LLMJudge`: deterministic per-scenario checklist, CoT-before-verdict, met-fraction
   computed in code, scoring a consolidation turn appended after the loop (decision 18)
 - `analysis.py`: the utility-vs-effort figure from a results JSONL — mean line per model,
-  individual seed scores as dots (decision 19)
+  individual seed scores as dots (decision 19) — plus the effort-manipulation summary
+  (decision 21)
+- Judge hardening for real spend: bounded repair-retry on malformed judge responses
+  (decision 20) and golden-set validation as a pre-run CLI gate (decision 22)
+- The real run: `configs/experiment.yaml` (24 episodes, $1.80, cached) and `configs/pilot.yaml`
+  (one-cell dress rehearsal), gated behind judge validation
 
-123 tests: config validation (incl. identity/duplicate rejection), mock determinism, end-to-end
+137 tests: config validation (incl. identity/duplicate rejection), mock determinism, end-to-end
 matrix contract, prompt fingerprinting, user-sim stop semantics, channel isolation, the telemetry
 span layer's observational contract, pricing math, cache invariance, stubbed-SDK provider mapping,
 judge parsing/scoring, and analysis aggregation + rendering.
 
-Not yet built: the real-model run (`experiment.yaml`) with its manipulation check and golden-set
-judge validation, the second task (`csv_cleaning`), cost/latency-vs-utility plots, Docker. See
-[PROJECT.md](PROJECT.md) milestones M1–M4.
+Not yet built: the second task (`csv_cleaning`), cost/latency-vs-utility plots (M2), Docker (M3).
+See [PROJECT.md](PROJECT.md) milestones M1–M4.
 
 ## Key design decisions
 
@@ -289,10 +293,11 @@ file's name and bytes, snapshotted once at import.
   instrument. The hash is measured, never passed in — a caller can't claim an identity other than
   the one that ran.
 - **Gaps:** raw-byte hashing is line-ending sensitive (irrelevant on the Linux/CI/Docker target,
-  a caveat if that changes); `rubric_v1.md` requests an integer 0–10 while `JudgeScore.score` is
-  bounded to [0, 1] — the real judge must normalize (÷10) or its first construction raises
-  `ValidationError`; an empty prompt directory fingerprints as hash-of-nothing rather than failing
-  loud (guarded indirectly: the effort-prompt table fails at import if its files are missing).
+  a caveat if that changes); an empty prompt directory fingerprints as hash-of-nothing rather than
+  failing loud (guarded indirectly: the effort-prompt table fails at import if its files are
+  missing). The chunk-1 `rubric_v1.md` (holistic 0–10) was rewritten in place to the checklist
+  contract before any real result existed under the `v1` label; now that real results do exist,
+  the label is frozen — rubric edits land as `rubric_v2.md` (decision 22).
 
 ### 14. Telemetry is an observational span layer; experiment identity is blind to it
 
@@ -358,9 +363,7 @@ disk response cache (`models/cache.py`) applied by *composition* — `CachedMode
   `max_tokens`, so `ModelConfig` grew an optional field the Anthropic wrapper demands at
   construction — which changed every config's serialized form and therefore every `config_hash`:
   correct, since the experiment-definition space itself grew.
-- **Gaps:** the judge is not yet cache-wrapped (`JUDGE_REGISTRY` is mock-only today; the real LLM
-  judge must thread the cache through when it lands, or judge calls ship uncached).
-  `ResponseCache.put` is not atomic — a process killed mid-write leaves a truncated file that
+- **Gaps:** `ResponseCache.put` is not atomic — a process killed mid-write leaves a truncated file that
   fails loud (`ValidationError`) on the next read rather than silently corrupting results;
   temp-file+rename is a cheap later hardening. The pricing table is a single dated snapshot: no
   per-date ranges, and prompt-caching/batch discounts aren't modeled, so recorded costs are
@@ -411,9 +414,11 @@ it for auditability — isolation is about model-visible channels; the log is ne
   measures, or let ground truth contaminate the sim.
 - **Gaps:** the sim *choosing* to reveal a hidden requirement is the treatment, not a leak — the
   canary test can't (and shouldn't) prevent voluntary disclosure by a real sim model. Scenario
-  tables are small (4 per task) and hand-written; `rubric_version` stays `v1` until real results
-  exist under it. Behavioral distinctness of effort levels on this task is unverified until the
-  M1 manipulation check runs on real models (mock models ignore their prompts).
+  tables are small (4 per task) and hand-written, and lack some real-world context (no home
+  city), which occasionally forces the sim to deflect a reasonable agent question. Behavioral
+  distinctness of effort levels was confirmed on the M1 real run (words per user message
+  23 → 141 → 286 across effort levels; decision 21). `rubric_version` `v1` is frozen now that
+  real results exist under it (decision 22).
 
 ### 18. Checklist judge over a consolidated artifact, not the raw transcript
 
@@ -490,12 +495,91 @@ it).
   assumes one run per file (multi-run comparison would need a run/config dimension); no
   significance testing, deliberately (nothing honest to compute at this N).
 
+### 20. Judge repair-retry extends the conversation; the cache makes it deterministic
+
+A judge response that fails `_parse_criteria` used to kill `run_matrix` — and because
+`CachedModel` stores raw responses before the judge parses them, the malformed response was
+cached, so every re-run replayed the identical failure: a permanent wedge that only manual cache
+surgery could clear. `LLMJudge.score` now retries within the call by *extending* the same
+conversation — the malformed response goes back as the assistant turn it was, followed by a
+corrective user message (`prompts/judge_repair.md`) carrying the parse error — bounded by
+`JudgeConfig.max_repair_attempts` (default 1; 0 restores single-shot), then re-raises.
+
+- **Why extension, not resampling:** the cache keys on the full message list, so the extended
+  conversation is a new request identity — no cache-layer changes, no cache-busting nonce
+  polluting the request identity the cache vouches for. It also works at temperature 0, where a
+  plain resample would likely repeat the mistake: showing the model its error actually changes
+  the input. Both the failure and the successful repair get cached, so re-runs replay the whole
+  fail-then-repair sequence deterministically and free.
+- **Why still fail-loud on exhaustion:** a model that fails the same repair prompt with the error
+  in front of it repeatedly is a systematic rubric/model mismatch, not transient flakiness —
+  that's an instrument failure a human must triage (decision 18's contract, unchanged).
+- **Accounting:** every attempt is a real costed call; `JudgeScore.usage` sums all of them.
+  `max_repair_attempts` affects scoring outcomes, so it flows into `experiment_hash` like any
+  other judge parameter.
+- **Gaps:** per-episode exception isolation and resume-from-JSONL are deliberately deferred —
+  with the cache, re-running a crashed matrix costs ~nothing, so the wedge (not the re-pay) was
+  the real problem, and the repair removes the wedge.
+
+### 21. The manipulation check is an analysis aggregation, not a gate
+
+`analysis.effort_manipulation` summarizes simulated-user behavior per (task, effort) — mean
+message-bearing user turns per episode, pooled words per user message, mean sim output tokens
+including stop probes — printed alongside the score table on every `analysis` run.
+
+- **Why it exists:** a utility-vs-effort curve is uninterpretable unless the effort levels
+  actually produced behaviorally distinct users — treatment failure and a true null look
+  identical in the curve. The check makes the treatment's delivery observable from data the
+  runner already logs.
+- **Why it computes but never asserts:** monotone separation (passive < moderate <
+  active_steering) is a property of a particular run, not of the software — a code assertion
+  would fail CI on mock runs (mock sims ignore prompts, identical across efforts, which the
+  smoke output correctly shows) and would hard-code an expectation the real data is supposed to
+  *test*. The reader judges separation; the DoD note records it.
+- **Gaps:** word count is a crude proxy for steering *content* (a long message isn't necessarily
+  a directive one); no per-model breakdown (the sim is shared apparatus, but sim behavior could
+  in principle differ against different agents' outputs — pooled for now).
+
+### 22. Golden-set judge validation: ground truth by construction, human labels, CLI gate
+
+Before any matrix spend, the judge must pass `python -m collab_eval.judge_validation` against
+`golden/trip_planning.yaml`: ~21 artifacts with known per-criterion boolean labels, scored
+through the judge's real call path; any per-criterion disagreement fails the gate (exit 1).
+
+- **Why ground truth by construction:** target label vectors are decided *first* and artifact
+  text manufactured to match, so the expected output is an exact boolean vector per artifact —
+  a much stronger target than score ordering (a judge that answers "met" everywhere still passes
+  a pure ordering test on most sets). Coverage rules: every criterion false somewhere and true
+  somewhere else; minimal pairs (identical texts differing in exactly one criterion) isolate the
+  subtle criteria; targeted probes cover the biases the checklist design claims to blunt
+  (verbosity confound, plausible-but-wrong specifics, injection via embedded instructions and
+  fence forgery — decision 6's gap, now exercised).
+- **Why human labels over LLM labels:** drafts come from a third-family LLM (neither the judge's
+  nor either agent's family — no distributional circularity), but every label is human-verified
+  against the text alone; an undecidable artifact is edited until decidable, never
+  tolerance-labeled. The set is version-locked to `rubric_version` — a v2 rubric requires
+  revalidation, which is also why rubric labels freeze once results exist under them.
+- **Why a CLI module, not pytest:** paid calls must never hide behind a bare `pytest` (keyless
+  CI is a repo invariant); validation is per-rubric-version operational gating, not a regression
+  suite. The module's own logic (loader fail-loud paths, agreement detection, exit codes) is
+  unit-tested over stubs, keyless.
+- **First run (2026-07-12):** 147/148 criterion agreements; the one disagreement was a fixture
+  bug — a date violation entangled with the season-tied crowd criterion, undecidable by our own
+  standard — reworked to orthogonal violations, then 148/148. Structured per-criterion verdicts
+  (`JudgeScore.criteria`) were added for this comparison and now ride along in every real run's
+  JSONL as the checklist audit trail.
+- **Gaps:** N≈21 hand-verified artifacts is a smoke test of the instrument, not a statistical
+  estimate of judge accuracy; single judge model (sensitivity to the judging model remains
+  unstudied, parked in PROJECT.md §6); no stability/repeat check (would need cache-off repeat
+  calls; deferred).
+
 ## Testing strategy
 
 Tests were written red-first (each test file failed before its implementation existed):
 
 - `tests/test_config.py` — schema round-trip and every fail-loud path (unknown key, missing field,
-  bad effort level, duplicate matrix cells, blank/colliding labels, temperature bounds)
+  bad effort level, duplicate matrix cells, blank/colliding labels, temperature bounds), plus the
+  spend guardrails on the real-run configs (every LLM priced, `max_tokens` capped, cache on)
 - `tests/test_mock_model.py` — mock determinism, nonzero synthetic usage, `Usage` arithmetic
 - `tests/test_runner_smoke.py` — the end-to-end contract: matrix completeness, JSONL round-trip,
   CSV shape, transcript alternation, turn cap, the consolidation turn ending every episode
@@ -508,7 +592,8 @@ Tests were written red-first (each test file failed before its implementation ex
   mid-reply mentions do not; `user_context` lands in the sim's system prompt
 - `tests/test_trip_planning.py` — seed-stability across repeated calls, distinct scenarios per
   seed, modulo wrap for out-of-range seeds, destination consistency across all three views,
-  `judge_criteria` matching the scenario (7 items) and stable across calls, and registry lookup
+  `judge_criteria` matching the scenario (4 fields + one per constraint; party is composition-only,
+  needs are their own criteria) and stable across calls, and registry lookup
 - channel isolation (in `test_runner_smoke.py`) — canary tokens in `user_context`/`judge_context`
   reach only their consumer: never the agent's conversation, the logged transcript, or each
   other's inputs; the episode record carries the `user_context` it ran with
@@ -526,13 +611,20 @@ Tests were written red-first (each test file failed before its implementation ex
 - `tests/test_providers.py` — stubbed SDK clients, zero network: request mapping (params, system
   extraction for Anthropic), usage mapping, content-extraction edge cases, and fail-loud paths
   (missing env key, missing `max_tokens`, empty content)
-- `tests/test_judge.py` — `LLMJudge` over a stub `AgentModel`: met-fraction scoring, code-fence
-  tolerance, fail-loud parsing (not-JSON, wrong criteria count, empty reasoning, non-boolean
-  verdict); `build_judge` resolving mock vs. a registered provider, and cache wrapping of the
-  backing model when enabled
+- `tests/test_judge.py` — `LLMJudge` over a stub `AgentModel`: met-fraction scoring, structured
+  per-criterion verdicts, code-fence tolerance, fail-loud parsing (not-JSON, wrong criteria count,
+  empty reasoning, non-boolean verdict) with the repair budget exhausted before raising, the
+  repair path itself (bad response + parse error re-enter the conversation; usage sums both
+  attempts); `build_judge` resolving mock vs. a registered provider, threading
+  `max_repair_attempts`, and cache wrapping of the backing model when enabled
+- `tests/test_judge_validation.py` — golden-set loader fail-loud paths (unknown key, task
+  mismatch, stale expected-vector length, duplicate names, unexplained unmet), per-criterion
+  agreement/disagreement detection, rubric-version and no-verdicts rejection, CLI exit codes —
+  all over stubs, keyless
 - `tests/test_analysis.py` — aggregation correctness (per-cell means, treatment-order effort axis,
-  no phantom cells) and the end-to-end chain on real smoke output (JSONL round-trip, figure
-  renders)
+  no phantom cells), the manipulation-check summary (stop probes excluded from turn counts but
+  included in token sums, agent turns isolated, no cross-task pooling), and the end-to-end chain
+  on real smoke output (JSONL round-trip, figure renders)
 
 Run with `uv run pytest` — no keys, no network.
 
