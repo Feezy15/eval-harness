@@ -29,6 +29,7 @@ ATTR_RUN_NAME = "collab_eval.run_name"
 ATTR_CONFIG_HASH = "collab_eval.config_hash"
 ATTR_PROMPTS_HASH = "collab_eval.prompts_hash"
 ATTR_N_EPISODES = "collab_eval.n_episodes"
+ATTR_N_EPISODES_RESUMED = "collab_eval.n_episodes_resumed"
 
 ATTR_EPISODE_ID = "collab_eval.episode_id"
 ATTR_TASK = "collab_eval.task"

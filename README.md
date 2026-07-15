@@ -55,8 +55,34 @@ are free).
   (`golden/`, `python -m collab_eval.judge_validation`).
 
 Read these as directional at this scale: 4 scenarios per cell (seeds select scenarios, so dots mix
-scenario difficulty with sampling variance), one task, one judge model. Cost/latency-vs-utility
-curves are next (M2).
+scenario difficulty with sampling variance), one task, one judge model.
+
+### Cost of Effort (M2): the agent-cost/latency-vs-utility frontier
+
+Same 24 episodes, re-analyzed on the deployer side: each point is a (model, effort) cell at its
+mean **agent-only** cost/latency (user-sim and judge spend excluded). Segments
+connect effort levels in order, so a segment's slope is the marginal utility of extra involvement.
+
+![Utility vs. agent cost and latency for two models on trip_planning](docs/figures/experiment_cost_latency_frontier.png)
+
+- **The two models buy the same utility gain differently.** `gpt-5.4-mini`'s passive →
+  moderate segment is vertical: +0.24 met-fraction at essentially zero added agent cost
+  ($0.0471 → $0.0473, 47 → 46 s). `claude-haiku-4-5` converts the same user involvement into
+  more agent work: +0.16 met-fraction for 2.4× the cost ($0.032 → $0.075) and 2.3× the latency
+  (44 → 99 s). An engaged user makes gpt cheaper per unit utility and makes haiku slower and
+  more expensive.
+- **Past moderate, no segment goes up.** Both models' moderate → active_steering segments move
+  sideways or down (haiku: same 0.89 utility at slightly lower cost; gpt: −0.07 utility). The
+  plateau from the utility curve reappears here as a frontier statement: beyond moderate
+  involvement, extra user effort buys no utility at any price the deployer pays.
+- **One configuration dominates.** `gpt-5.4-mini` at moderate effort (0.93 met-fraction,
+  $0.047, 46 s) beats every other cell on all three axes at once — including both models'
+  active-steering cells. On this task, "mid-size model + moderately engaged user" is the whole
+  frontier.
+
+Per-cell utility-per-dollar and utility-per-second are printed by the analysis CLI rather than
+plotted: with utility bounded at 1, those ratios mechanically favor the cheapest cells, so they're
+context, not a ranking.
 
 ## Quickstart
 
@@ -75,8 +101,13 @@ uv run pytest && uv run ruff check .
 uv run python -m collab_eval.judge_validation --config configs/experiment.yaml --golden golden/trip_planning.yaml
 uv run python -m collab_eval.runner --config configs/experiment.yaml
 
-# Render the utility-vs-effort plot from a results file
-# (writes results/<run>_utility_vs_effort.png; override with --out)
+# A failing episode is recorded to results/<run>_failures.jsonl and skipped
+# (exit code 1); rerun with --resume to run only the missing episodes
+uv run python -m collab_eval.runner --config configs/experiment.yaml --resume
+
+# Render the utility-vs-effort plot and the cost/latency-vs-utility frontier
+# from a results file (writes results/<run>_utility_vs_effort.png and
+# results/<run>_cost_latency_frontier.png; override with --out / --frontier-out)
 uv run python -m collab_eval.analysis --results results/<run>.jsonl
 ```
 
@@ -89,7 +120,7 @@ Everything is config-driven — no hardcoded parameters. Define the experiment m
 
 | Module | Role |
 |---|---|
-| `tasks/` | Iterative tasks + scoring (`trip_planning`, `csv_cleaning`) |
+| `tasks/` | Iterative tasks + scoring (`trip_planning`) |
 | `models/` | LLM wrappers behind one interface (+ `mock.py`) |
 | `user_sim.py` | Simulated user at configurable effort levels |
 | `judge.py` | LLM-as-judge with a versioned rubric |

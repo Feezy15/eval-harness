@@ -21,7 +21,7 @@ Goals:
 - **Reproducibility as a first-class feature** — pinned deps, fixed seeds, one-command runs.
 
 **Definition of "done":** a public repo where one command reproduces a utility-vs-effort curve for 2+ models on
-2 tasks, plus a cost/latency-vs-utility curve, with a clean README and honest limitations.
+a real multi-turn task, plus a cost/latency-vs-utility curve, with a clean README and honest limitations.
 
 ---
 
@@ -51,7 +51,7 @@ at each level and plots the resulting curves across models.
 Pluggable interfaces (small and swappable):
 
 - **`Task`** — an iterative task: initial user goal/state and how to score a candidate output (task metric or
-  LLM-judged rubric). Start with `trip_planning`, `csv_cleaning`.
+  LLM-judged rubric). The real task is `trip_planning`.
 - **`AgentModel`** — wraps an LLM behind one interface (`next_turn(conversation) -> message`). Config: provider,
   model, temperature. Providers: OpenAI + Anthropic to start.
 - **`UserSimulator`** — an LLM prompted to play the user at a configurable **effort level**
@@ -70,7 +70,7 @@ collab-effort-eval/
   Dockerfile
   configs/           # smoke.yaml (mock), experiment.yaml (real)
   src/collab_eval/
-    tasks/           # trip_planning.py, csv_cleaning.py, base.py
+    tasks/           # trip_planning.py, base.py
     models/          # openai.py, anthropic.py, base.py, mock.py
     user_sim.py
     judge.py
@@ -82,7 +82,7 @@ collab-effort-eval/
 ```
 
 **Stack:** Python 3.12, OpenAI + Anthropic SDKs, pydantic (config), pandas + matplotlib (analysis), pytest,
-Docker, GitHub Actions CI. Optional: vLLM (open-weight models), Weights & Biases (run tracking).
+Docker, GitHub Actions CI. Optional: Weights & Biases (run tracking).
 
 ---
 
@@ -115,10 +115,17 @@ Repo skeleton, config loading, interfaces defined, a **mock model** so the loop 
   and `judge_validation` as a pre-run CLI gate. 137 tests green; decisions 13–22 in
   `docs/architecture.md`.
 
-### 🔜 M2 — The extension (cost/latency-vs-utility)
-Add token/cost/latency logging and render **utility-per-dollar** and **utility-per-second** curves; add a 2nd
-task and/or an open-weight model.
+### ✅ M2 — The extension (cost/latency-vs-utility)
+Add token/cost/latency logging and render **utility-per-dollar** and **utility-per-second** curves.
 - **DoD:** a cost-vs-utility plot (not in the paper) plus a short written takeaway.
+- **Status (2026-07-15): DoD met** — the two-panel agent-cost/latency-vs-utility frontier
+  (`plot_cost_latency_frontier`, `--frontier-out`) plus per-cell utility-per-dollar /
+  utility-per-second in the CLI table, computed agent-only (decision 23). Takeaway on the M1 data
+  is in the README's "Cost of Effort" section: gpt-5.4-mini's passive→moderate gain is free
+  deployer-side while haiku pays 2.4× cost / 2.3× latency, and no segment rises past moderate.
+  Robustness landed with it: a failing episode is isolated to a `{run}_failures.jsonl` sidecar
+  instead of aborting the matrix, and `--resume` re-runs only the missing cells of an existing
+  results file under a verified experiment identity.
 
 ### ⬜ M3 — Reproducibility & engineering polish
 Dockerfile, pinned deps, fixed seeds, config-driven matrix, unit tests + GitHub Actions CI (mock model, no
@@ -137,7 +144,7 @@ section.
 
 - **Not a general eval framework.** Don't reinvent lm-eval-harness / HELM. Stay focused on multi-turn
   collaborative eval — the thin-tooling area.
-- **Keep the matrix small.** 2 tasks × 2–3 models × 3 effort levels × a few seeds.
+- **Keep the matrix small.** 1 task × 2–3 models × 3 effort levels × a few seeds.
 - **Reproducibility is a feature, not an afterthought.**
 - **Measure cost/latency from day one** — it's cheap to log and it's the differentiator.
 - **Write honest limitations** — small samples, LLM-judge bias, and user-simulator realism are real caveats.
@@ -149,7 +156,6 @@ section.
 
 - Robustness: vary the user-simulator prompt and the judge model; report sensitivity.
 - New user types: `novice`, `expert`, `adversarial`.
-- Open-weight models via vLLM (does effort-scaling hold for small models?).
 - A small human spot-check to sanity-check the LLM judge.
 - Contribute an improvement upstream to a related open-source project (e.g., Sotopia / HAICOSYSTEM).
 

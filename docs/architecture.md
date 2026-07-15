@@ -101,13 +101,13 @@ M1 complete (first real results 2026-07-12; see the README's "First results"):
 - The real run: `configs/experiment.yaml` (24 episodes, $1.80, cached) and `configs/pilot.yaml`
   (one-cell dress rehearsal), gated behind judge validation
 
-137 tests: config validation (incl. identity/duplicate rejection), mock determinism, end-to-end
-matrix contract, prompt fingerprinting, user-sim stop semantics, channel isolation, the telemetry
-span layer's observational contract, pricing math, cache invariance, stubbed-SDK provider mapping,
-judge parsing/scoring, and analysis aggregation + rendering.
+143 tests: config validation (incl. identity/duplicate rejection), mock determinism, end-to-end
+matrix contract, prompt fingerprinting, user-sim stop semantics, channel isolation, per-episode
+failure isolation + resume, the telemetry span layer's observational contract, pricing math,
+cache invariance, stubbed-SDK provider mapping, judge parsing/scoring, and analysis aggregation +
+rendering.
 
-Not yet built: the second task (`csv_cleaning`), cost/latency-vs-utility plots (M2), Docker (M3).
-See [PROJECT.md](PROJECT.md) milestones M1–M4.
+Not yet built: Docker (M3). See [PROJECT.md](PROJECT.md) milestones M1–M4.
 
 ## Key design decisions
 
@@ -203,8 +203,8 @@ finishes; the flat `results/<run>.csv` summary is written at the end, derived fr
   matters once episodes cost real money). JSONL keeps the full record for qualitative transcript
   review; CSV is the pandas-ready analysis view. The derivation direction (CSV from JSONL, never the
   reverse) means there is one source of truth.
-- **Gaps:** a rerun overwrites the same files (no resume, no response caching yet); records carry a
-  `config_hash` but no schema-version field, which will matter once the record format evolves.
+- **Gaps:** records carry a `config_hash` but no schema-version field, which will matter once the
+  record format evolves.
 
 ### 8. Strict config + fail-loud registries
 
@@ -517,13 +517,10 @@ corrective user message (`prompts/judge_repair.md`) carrying the parse error —
 - **Accounting:** every attempt is a real costed call; `JudgeScore.usage` sums all of them.
   `max_repair_attempts` affects scoring outcomes, so it flows into `experiment_hash` like any
   other judge parameter.
-- **Gaps:** per-episode exception isolation and resume-from-JSONL are deliberately deferred —
-  with the cache, re-running a crashed matrix costs ~nothing, so the wedge (not the re-pay) was
-  the real problem, and the repair removes the wedge. Related (flagged in the M1 PR review,
-  deferred to M2 with the isolation work): when the repair budget is exhausted, `score()` raises
-  before returning, so the failed attempts' accumulated usage never reaches the JSONL or the
-  judge span — real spend (bounded at `max_repair_attempts + 1` judge calls) that the harness's
-  own accounting can't see; the cache still holds the responses.
+- **Gaps:** when the repair budget is exhausted, `score()` raises before returning, so the
+  failed attempts' accumulated usage never reaches the JSONL or the judge span — real spend
+  (bounded at `max_repair_attempts + 1` judge calls) that the harness's own accounting can't
+  see; the cache still holds the responses.
 
 ### 21. The manipulation check is an analysis aggregation, not a gate
 
@@ -576,6 +573,67 @@ through the judge's real call path; any per-criterion disagreement fails the gat
   estimate of judge accuracy; single judge model (sensitivity to the judging model remains
   unstudied, parked in PROJECT.md §6); no stability/repeat check (would need cache-off repeat
   calls; deferred).
+
+### 23. Cost/latency analysis is agent-only spend; efficiency ratios are table output, not figures
+
+M2's frontier analysis (`agent_usage`, `cost_latency_by_effort`, `plot_cost_latency_frontier`,
+`--frontier-out`) reads the same results JSONL and plots each (task, model, effort) cell at its
+mean agent cost/latency against mean utility, connecting effort levels in treatment order.
+
+- **Why agent-only, not episode totals:** the research question is what a *deployer* pays per
+  effort level. `EpisodeResult.totals` sums agent + user-sim + judge calls, but the sim stands in
+  for a human whose real cost is effort (not API dollars) and the judge is measurement overhead —
+  pooling them would let eval-instrument spend distort the deployment-cost axis. `agent_usage`
+  re-sums per-turn `Usage` where `actor == "agent"`; episode totals stay in the CLI table as
+  context.
+- **Why ratio-of-means for utility-per-dollar/-second:** with a handful of episodes per cell, one
+  cheap low-scoring episode dominates an averaged per-episode ratio; `mean_score / mean_cost` is
+  the stabler estimator at this N.
+- **Why ratios stay in the CLI table:** the plotted deliverable is the frontier; per-cell
+  utility-per-dollar/-second and any marginal deltas are printed context.
+- **Figure conventions inherited from decision 19:** JSONL not CSV, faint per-seed replicate
+  dots, fail-loud four-slot palette, effort as ordered categorical. New here: per-effort-level
+  label offsets (a plateau puts two effort cells on nearly the same frontier point, and a shared
+  offset would overprint their labels), and one task title/ylabel per panel pair.
+- **Zero-spend cells:** mock runs produce ~zero agent cost/latency; ratios go NaN via the same
+  `replace(0, nan)` convention as the manipulation check — surfaced, not hidden, and the CLI
+  prints them without crashing (smoke stays keyless and green).
+- **Gaps:** decision 20's repair-budget accounting gap (usage lost when the judge repair budget
+  exhausts) is moot for these agent-only metrics but still open for judge-cost reporting; the
+  frontier assumes one run per file, like the utility figure; latency is provider-reported call
+  time summed per episode, so it tracks API-side generation time, not user-perceived wall clock
+  with network overhead.
+
+### 24. A failing episode is a recorded skip; `--resume` continues a run under the same identity
+
+`run_matrix` isolates each cell: an exception inside an episode is caught, recorded to a
+`{run_name}_failures.jsonl` sidecar (one `EpisodeFailure` line: cell identity, exception type,
+message), logged to stderr, and the matrix moves on; the CLI exits nonzero if anything failed.
+`--resume` runs only the cells missing from an existing results file, appending to it.
+
+- **Why isolate at the episode:** one flaky provider call or an exhausted judge-repair budget
+  shouldn't cost every other cell's spend and wall clock. Construction failures (unknown
+  provider or task, judge setup) still abort — they mean the run can't proceed at all, not that
+  one cell is bad; KeyboardInterrupt/SystemExit stay fatal.
+- **Why a sidecar, not failure rows in the results JSONL:** every line of the results file
+  round-trips as a scored `EpisodeResult`, so analysis consumes it without filtering; a failure
+  is a different shape (never scored). The sidecar is removed at the start of every invocation,
+  so its absence always means a clean run — and failed cells are absent from the results file,
+  so a resume retries them naturally.
+- **Why resume is explicit and identity-checked:** appending to results from a different config
+  or prompt text would silently mix two experiments into one file, so resume fails loud unless
+  every existing record's `config_hash` and `prompts_hash` match the current run, and a corrupt
+  line is fatal rather than skipped. Without the flag a rerun truncates as before: the cache
+  replays completed calls with their recorded cost/latency, so an overwritten run is exactly
+  recomputable and overwrite stays the cheap default.
+- **Episode identity and resume telemetry:** `make_episode_id` is the single authority on
+  episode identity — `run_episode` stamps it into the record and the resume skip check matches
+  against it, so the two can't drift. The run span reports `n_episodes` (executed this
+  invocation) and `n_episodes_resumed` (loaded from the existing file) separately, so a
+  resumed run's trace describes what actually ran.
+- **Gaps:** a failed episode's partial spend (calls made before the exception) is visible only
+  in the cache and spans, not the JSONL — the same accounting shape as decision 20's
+  repair-exhaustion gap.
 
 ## Testing strategy
 

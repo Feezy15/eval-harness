@@ -8,6 +8,7 @@ derived from the JSONL records.
 
 import argparse
 import csv
+import sys
 from collections.abc import Mapping
 from datetime import UTC, datetime
 from pathlib import Path
@@ -24,7 +25,7 @@ from collab_eval.models.pricing import PRICING_VERSION
 from collab_eval.prompts import PROMPTS_FINGERPRINT, load_prompt
 from collab_eval.tasks import TASK_REGISTRY, Task
 from collab_eval.telemetry import build_tracer
-from collab_eval.types import EpisodeResult, Message, TurnRecord, Usage
+from collab_eval.types import EpisodeFailure, EpisodeResult, Message, TurnRecord, Usage
 from collab_eval.user_sim import UserSimulator
 
 # The last in-loop agent turn is often a delta ("swapped Hotel X for Y"), not
@@ -33,6 +34,14 @@ from collab_eval.user_sim import UserSimulator
 # a restatement). So every episode gets one extra agent call, outside the
 # max_turns cap, eliciting the complete artifact the judge actually scores.
 FINAL_ARTIFACT_REQUEST = load_prompt("final_artifact_request")
+
+
+def make_episode_id(task_name: str, model_label: str, effort: str, seed: int) -> str:
+    """Single authority on episode identity. `run_episode` stamps it into the
+    persisted record and `run_matrix`'s resume path matches against it to skip
+    completed cells — deriving the id in two places would let a format change
+    in one silently break the other's matching."""
+    return f"{task_name}__{model_label}__{effort}__s{seed}"
 
 
 def _lookup[T](registry: Mapping[str, T], key: str, kind: str) -> T:
@@ -114,7 +123,7 @@ def run_episode(
     turns: list[TurnRecord] = []
 
     with tracer.start_as_current_span("episode") as episode_span:
-        episode_id = f"{task.name}__{label}__{user_sim.effort}__s{seed}"
+        episode_id = make_episode_id(task.name, label, user_sim.effort, seed)
         episode_span.set_attribute(telemetry.ATTR_EPISODE_ID, episode_id)
         episode_span.set_attribute(telemetry.ATTR_TASK, task.name)
         episode_span.set_attribute(telemetry.ATTR_MODEL, label)
@@ -279,13 +288,63 @@ def run_episode(
     )
 
 
+def _load_resume_state(jsonl_path: Path, config_hash: str) -> tuple[list[EpisodeResult], set[str]]:
+    """Validate an existing results file against the current experiment
+    identity and return (episodes, completed episode ids) to resume from.
+
+    Corrupt lines are a pydantic ValidationError (a ValueError subclass) we
+    let propagate rather than skip: a half-written record is an instrument
+    problem to triage, not silently drop. A results file from a different
+    config or prompt text is a different experiment; appending to it would
+    silently mix two conditions into one file, so that's also fatal.
+    """
+    episodes: list[EpisodeResult] = []
+    for line in jsonl_path.read_text().splitlines():
+        if not line.strip():
+            continue
+        record = EpisodeResult.model_validate_json(line)
+        if record.config_hash != config_hash:
+            raise ValueError(
+                f"resume: {jsonl_path} contains results with config_hash "
+                f"{record.config_hash!r}, but the current config hashes to "
+                f"{config_hash!r} — these are different experiments"
+            )
+        if record.prompts_hash != PROMPTS_FINGERPRINT:
+            raise ValueError(
+                f"resume: {jsonl_path} contains results with prompts_hash "
+                f"{record.prompts_hash!r}, but the current prompts hash to "
+                f"{PROMPTS_FINGERPRINT!r} — the instrument text changed"
+            )
+        episodes.append(record)
+    return episodes, {r.episode_id for r in episodes}
+
+
+def _record_failure(path: Path, failure: EpisodeFailure) -> None:
+    # Opened per failure, not held open for the whole matrix: failures are
+    # rare, and this guarantees the line is on disk even if a later cell
+    # crashes the process outright.
+    with path.open("a") as f:
+        f.write(failure.model_dump_json() + "\n")
+
+
 def run_matrix(
-    config: Config, output_dir: str | Path | None = None, tracer: Tracer | None = None
+    config: Config,
+    output_dir: str | Path | None = None,
+    tracer: Tracer | None = None,
+    resume: bool = False,
 ) -> list[EpisodeResult]:
     """Run every cell of the configured matrix; write JSONL (full records,
     streamed) and CSV (flat summary). `output_dir` overrides config for tests;
     `tracer` likewise (tests inject an in-memory-exporting tracer instead of
-    building one from `config.telemetry`)."""
+    building one from `config.telemetry`).
+
+    A failing cell is isolated (recorded to the `_failures.jsonl` sidecar,
+    logged, skipped) rather than aborting the whole matrix — one bad episode
+    shouldn't cost every other cell's spend. `resume=True` skips cells already
+    present in an existing results file instead of re-running (and re-paying
+    for) them; construction failures before a cell's `run_episode` call
+    (unknown provider/task, cache/judge setup) are still fatal, since those
+    indicate the run can't proceed at all, not that one cell is bad."""
     out_dir = Path(output_dir) if output_dir is not None else config.output_dir
     out_dir.mkdir(parents=True, exist_ok=True)
     config_hash = experiment_hash(config)
@@ -305,20 +364,41 @@ def run_matrix(
         tracer, provider = build_tracer(config.telemetry)
 
     jsonl_path = out_dir / f"{config.run_name}.jsonl"
-    results: list[EpisodeResult] = []
+    failures_path = out_dir / f"{config.run_name}_failures.jsonl"
+    # Every invocation starts from a clean slate for the sidecar: its absence
+    # is the "nothing failed" signal a caller checks for, so a stale file from
+    # a previous run must never survive into this run's report.
+    failures_path.unlink(missing_ok=True)
+
+    is_resuming = resume and jsonl_path.exists()
+    if is_resuming:
+        results, done_ids = _load_resume_state(jsonl_path, config_hash)
+    else:
+        results, done_ids = [], set()
+    n_resumed = len(results)
+
     try:
         with tracer.start_as_current_span("run") as run_span:
             run_span.set_attribute(telemetry.ATTR_RUN_NAME, config.run_name)
             run_span.set_attribute(telemetry.ATTR_CONFIG_HASH, config_hash)
             run_span.set_attribute(telemetry.ATTR_PROMPTS_HASH, PROMPTS_FINGERPRINT)
 
-            with jsonl_path.open("w") as jsonl_file:
+            # "a" preserves already-validated lines byte-for-byte; a fresh or
+            # non-resumed run truncates, matching the pre-resume behavior.
+            with jsonl_path.open("a" if is_resuming else "w") as jsonl_file:
                 for task_cfg in config.tasks:
                     task = _lookup(TASK_REGISTRY, task_cfg.name, "task")()
                     for model_cfg in config.models:
                         for effort in config.user_sim.effort_levels:
                             for seed in config.seeds:
                                 agent = _build_model(model_cfg, seed, cache=cache)
+                                label = (
+                                    model_cfg.label if model_cfg.label is not None else agent.name
+                                )
+                                episode_id = make_episode_id(task.name, label, effort, seed)
+                                if episode_id in done_ids:
+                                    continue
+
                                 sim_model = _build_model(
                                     ModelConfig(
                                         provider=config.user_sim.provider,
@@ -329,28 +409,54 @@ def run_matrix(
                                     seed,
                                     cache=cache,
                                 )
-                                episode = run_episode(
-                                    task,
-                                    agent,
-                                    UserSimulator(
-                                        model=sim_model,
+                                started_at = datetime.now(UTC)
+                                try:
+                                    episode = run_episode(
+                                        task,
+                                        agent,
+                                        UserSimulator(
+                                            model=sim_model,
+                                            effort=effort,
+                                            user_context=task.user_context(seed),
+                                        ),
+                                        judge,
+                                        seed=seed,
+                                        max_turns=config.max_turns,
+                                        run_name=config.run_name,
+                                        config_hash=config_hash,
+                                        model_label=model_cfg.label,
+                                        tracer=tracer,
+                                    )
+                                except (KeyboardInterrupt, SystemExit):
+                                    raise
+                                except Exception as exc:
+                                    failure = EpisodeFailure(
+                                        episode_id=episode_id,
+                                        task=task.name,
+                                        model=label,
                                         effort=effort,
-                                        user_context=task.user_context(seed),
-                                    ),
-                                    judge,
-                                    seed=seed,
-                                    max_turns=config.max_turns,
-                                    run_name=config.run_name,
-                                    config_hash=config_hash,
-                                    model_label=model_cfg.label,
-                                    tracer=tracer,
-                                )
+                                        seed=seed,
+                                        error_type=type(exc).__name__,
+                                        error=str(exc),
+                                        started_at=started_at,
+                                    )
+                                    _record_failure(failures_path, failure)
+                                    print(
+                                        f"episode {episode_id} failed: "
+                                        f"{failure.error_type}: {failure.error}",
+                                        file=sys.stderr,
+                                    )
+                                    continue
                                 jsonl_file.write(episode.model_dump_json() + "\n")
                                 results.append(episode)
 
             # Set once the matrix is actually done, so this reflects what ran
-            # rather than a size computed in advance.
-            run_span.set_attribute(telemetry.ATTR_N_EPISODES, len(results))
+            # rather than a size computed in advance. Episodes loaded from a
+            # resumed results file are counted separately: the trace is the
+            # record of *this* invocation, and a resumed run never made those
+            # calls.
+            run_span.set_attribute(telemetry.ATTR_N_EPISODES, len(results) - n_resumed)
+            run_span.set_attribute(telemetry.ATTR_N_EPISODES_RESUMED, n_resumed)
     finally:
         if provider is not None:
             provider.shutdown()
@@ -419,10 +525,15 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument(
         "--config", required=True, type=Path, help="Path to a YAML experiment config"
     )
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="Skip episodes already present in an existing results file instead of rerunning them",
+    )
     args = parser.parse_args(argv)
 
     config = load_config(args.config)
-    results = run_matrix(config)
+    results = run_matrix(config, resume=args.resume)
 
     out_dir = config.output_dir
     print(f"{len(results)} episodes -> {out_dir / config.run_name}.jsonl / .csv")
@@ -431,6 +542,18 @@ def main(argv: list[str] | None = None) -> None:
             f"  {ep.episode_id}: score={ep.judge.score:.3f} "
             f"cost=${ep.totals.cost_usd:.6f} latency={ep.totals.latency_s:.2f}s"
         )
+
+    failures_path = out_dir / f"{config.run_name}_failures.jsonl"
+    if failures_path.exists() and failures_path.stat().st_size > 0:
+        failures = [
+            EpisodeFailure.model_validate_json(line)
+            for line in failures_path.read_text().splitlines()
+            if line.strip()
+        ]
+        print(f"{len(failures)} episodes failed:")
+        for f in failures:
+            print(f"  {f.episode_id}: {f.error_type}: {f.error}")
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

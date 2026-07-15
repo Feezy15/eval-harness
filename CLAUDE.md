@@ -21,7 +21,7 @@ Code quality, reproducibility, tests, and a clean README matter as much as resul
 ## Tech stack (do not deviate without asking)
 
 - Python 3.12
-- LLM providers: OpenAI + Anthropic SDKs (open-weight via vLLM only if asked)
+- LLM providers: OpenAI + Anthropic SDKs
 - Config & validation: pydantic + YAML
 - Analysis: pandas + matplotlib
 - Tests: pytest
@@ -31,7 +31,7 @@ Code quality, reproducibility, tests, and a clean README matter as much as resul
 
 ## Architecture (keep interfaces small and swappable)
 
-- `src/collab_eval/tasks/` — **Task**: a scoreable iterative task (`trip_planning`, `csv_cleaning`), `base.py`
+- `src/collab_eval/tasks/` — **Task**: a scoreable iterative task (`trip_planning`), `base.py`
 - `src/collab_eval/models/` — **AgentModel**: LLM wrapper, `next_turn(conversation) -> message`; includes `mock.py`
 - `src/collab_eval/user_sim.py` — **UserSimulator**: LLM playing the user at effort levels (`passive`, `moderate`, `active_steering`)
 - `src/collab_eval/judge.py` — **Judge**: LLM-as-judge with a versioned rubric
@@ -44,6 +44,7 @@ Code quality, reproducibility, tests, and a clean README matter as much as resul
 - Setup: `uv sync` (installs pinned Python 3.12 + deps into `.venv`)
 - Smoke run (no API cost): `uv run python -m collab_eval.runner --config configs/smoke.yaml`
 - Real run (M1+): `uv run python -m collab_eval.runner --config configs/experiment.yaml`
+  (add `--resume` to run only the cells missing from an existing results file)
 - Tests: `uv run pytest`
 - Lint/format: `uv run ruff check .` and `uv run ruff format .`
 - Plots (M1+): `uv run python -m collab_eval.analysis --results results/<run>.jsonl`
@@ -126,5 +127,11 @@ triage — decision 22), and `experiment.yaml`/`pilot.yaml` behind spend-guardra
 freshness is procedural: verify the pages cited in `models/pricing.py` and bump
 `PRICING_VERSION` before any paid run. 137 tests green.
 
-**Next:** M2 — cost/latency-vs-utility curves (`utility-per-dollar`, `utility-per-second`) and a
-second task. See `docs/PROJECT.md` for M0-M4.
+**M2 complete on `m2-extension`** (PR to `main` pending). Analysis (2026-07-15): agent-only
+cost/latency-vs-utility frontier (`plot_cost_latency_frontier`, `--frontier-out`) + per-cell
+utility-per-dollar / utility-per-second in the CLI output — decision 23; README "Cost of Effort"
+has the figure and takeaway; the analysis CLI writes two PNGs per run. Robustness (same day):
+a failing episode is recorded to `{run}_failures.jsonl` and skipped instead of aborting the
+matrix (CLI exits nonzero), and `runner --resume` re-runs only the cells missing from an
+existing results file, fail-loud on config/prompts identity mismatch — decision 24. 143 tests
+green. Next: M3 (Docker + reproducibility polish). See `docs/PROJECT.md` for M0-M4.
