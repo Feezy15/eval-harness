@@ -1,7 +1,7 @@
 """A trivial deterministic task so the episode loop has something to chew on.
 
-Exists for smoke runs and CI — real tasks (trip planning, CSV cleaning)
-implement the same four methods.
+Exists for smoke runs and CI — the real task (trip planning) implements the
+same four methods.
 """
 
 from collab_eval.tasks.base import Task

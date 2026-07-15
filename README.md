@@ -116,7 +116,7 @@ Everything is config-driven — no hardcoded parameters. Define the experiment m
 
 | Module | Role |
 |---|---|
-| `tasks/` | Iterative tasks + scoring (`trip_planning`, `csv_cleaning`) |
+| `tasks/` | Iterative tasks + scoring (`trip_planning`) |
 | `models/` | LLM wrappers behind one interface (+ `mock.py`) |
 | `user_sim.py` | Simulated user at configurable effort levels |
 | `judge.py` | LLM-as-judge with a versioned rubric |

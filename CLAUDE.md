@@ -21,7 +21,7 @@ Code quality, reproducibility, tests, and a clean README matter as much as resul
 ## Tech stack (do not deviate without asking)
 
 - Python 3.12
-- LLM providers: OpenAI + Anthropic SDKs (open-weight via vLLM only if asked)
+- LLM providers: OpenAI + Anthropic SDKs
 - Config & validation: pydantic + YAML
 - Analysis: pandas + matplotlib
 - Tests: pytest
@@ -31,7 +31,7 @@ Code quality, reproducibility, tests, and a clean README matter as much as resul
 
 ## Architecture (keep interfaces small and swappable)
 
-- `src/collab_eval/tasks/` — **Task**: a scoreable iterative task (`trip_planning`, `csv_cleaning`), `base.py`
+- `src/collab_eval/tasks/` — **Task**: a scoreable iterative task (`trip_planning`), `base.py`
 - `src/collab_eval/models/` — **AgentModel**: LLM wrapper, `next_turn(conversation) -> message`; includes `mock.py`
 - `src/collab_eval/user_sim.py` — **UserSimulator**: LLM playing the user at effort levels (`passive`, `moderate`, `active_steering`)
 - `src/collab_eval/judge.py` — **Judge**: LLM-as-judge with a versioned rubric

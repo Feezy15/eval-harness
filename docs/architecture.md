@@ -106,8 +106,7 @@ matrix contract, prompt fingerprinting, user-sim stop semantics, channel isolati
 span layer's observational contract, pricing math, cache invariance, stubbed-SDK provider mapping,
 judge parsing/scoring, and analysis aggregation + rendering.
 
-Not yet built: the second task (`csv_cleaning`), cost/latency-vs-utility plots (M2), Docker (M3).
-See [PROJECT.md](PROJECT.md) milestones M1–M4.
+Not yet built: Docker (M3). See [PROJECT.md](PROJECT.md) milestones M1–M4.
 
 ## Key design decisions
 
