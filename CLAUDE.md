@@ -108,8 +108,8 @@ decisions (with the why and known gaps) in `docs/architecture.md` and new comman
 
 ## Current status
 
-**M0 (scaffold & plumbing) complete and review-hardened** on branch `m0-scaffold`, PR #1 to `main`
-pending merge. DoD verified: `uv run python -m collab_eval.runner --config configs/smoke.yaml` runs
+**M0 (scaffold & plumbing) complete and review-hardened**, merged to `main` (PR #1).
+DoD verified: `uv run python -m collab_eval.runner --config configs/smoke.yaml` runs
 the full mock matrix (6 episodes) and writes `results/smoke.jsonl` + `.csv`; `uv run pytest` green
 (28 tests, red-bar TDD); ruff clean. Built: strict config loading (duplicate-cell rejection, unique
 model labels as episode identity), shared types, MockModel/MockJudge, UserSimulator (temperature in
@@ -117,7 +117,7 @@ config), episode loop + matrix runner (agent temperature recorded per episode), 
 keyless CI (pulled forward from M3). Design decisions + gaps: `docs/architecture.md` (see 10–12 for
 the review-hardening round).
 
-**M1 complete on `m1-mvp`** (PR to `main` pending). DoD met 2026-07-12: 24 real episodes
+**M1 complete, merged to `main` 2026-07-12 (PR #3).** DoD met: 24 real episodes
 (haiku-4-5 + gpt-5.4-mini, $1.80) show utility rising passive → moderate then plateauing — figure
 and note in the README's "First results". Chunk 7 landed: judge repair-retry (bounded,
 conversation-extending — decision 20), the effort-manipulation check in `analysis.py` (computes,
@@ -127,7 +127,7 @@ triage — decision 22), and `experiment.yaml`/`pilot.yaml` behind spend-guardra
 freshness is procedural: verify the pages cited in `models/pricing.py` and bump
 `PRICING_VERSION` before any paid run. 137 tests green.
 
-**M2 complete on `m2-extension`** (PR to `main` pending). Analysis (2026-07-15): agent-only
+**M2 complete, squash-merged to `main` 2026-07-15 (PR #4).** Analysis: agent-only
 cost/latency-vs-utility frontier (`plot_cost_latency_frontier`, `--frontier-out`) + per-cell
 utility-per-dollar / utility-per-second in the CLI output — decision 23; README "Cost of Effort"
 has the figure and takeaway; the analysis CLI writes two PNGs per run. Robustness (same day):
