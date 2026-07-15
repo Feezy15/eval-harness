@@ -101,6 +101,10 @@ uv run pytest && uv run ruff check .
 uv run python -m collab_eval.judge_validation --config configs/experiment.yaml --golden golden/trip_planning.yaml
 uv run python -m collab_eval.runner --config configs/experiment.yaml
 
+# A failing episode is recorded to results/<run>_failures.jsonl and skipped
+# (exit code 1); rerun with --resume to run only the missing episodes
+uv run python -m collab_eval.runner --config configs/experiment.yaml --resume
+
 # Render the utility-vs-effort plot and the cost/latency-vs-utility frontier
 # from a results file (writes results/<run>_utility_vs_effort.png and
 # results/<run>_cost_latency_frontier.png; override with --out / --frontier-out)

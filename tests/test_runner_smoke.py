@@ -6,19 +6,31 @@ episode stop conditions, and replay determinism).
 """
 
 import csv
+import json
 from collections.abc import Sequence
+from pathlib import Path
 
+import pytest
 import yaml
 
 from collab_eval.config import load_config
 from collab_eval.judge import Judge, MockJudge
+from collab_eval.models import MODEL_REGISTRY
 from collab_eval.models.mock import MockModel
+from collab_eval.runner import main as runner_main
 from collab_eval.runner import run_episode, run_matrix
 from collab_eval.tasks.base import Task
 from collab_eval.tasks.toy import ToyTask
-from collab_eval.types import EpisodeResult, JudgeScore, Message, Usage
+from collab_eval.types import EpisodeFailure, EpisodeResult, JudgeScore, Message, Usage
 from collab_eval.user_sim import STOP_SENTINEL, UserSimulator
-from conftest import EXPECTED_EPISODES, SMOKE_YAML, ScriptedModel
+from conftest import (
+    EXPECTED_EPISODES,
+    SMOKE_YAML,
+    FailingModel,
+    ScriptedModel,
+    smoke_dict,
+    write_yaml,
+)
 
 
 def test_matrix_writes_jsonl_that_round_trips(smoke_run):
@@ -34,6 +46,9 @@ def test_matrix_writes_jsonl_that_round_trips(smoke_run):
     assert len(cells) == EXPECTED_EPISODES
     assert {r.effort for r in parsed} == {"passive", "moderate", "active_steering"}
     assert {r.seed for r in parsed} == {0, 1}
+
+    # No sidecar after a clean run: its absence is the "nothing failed" signal.
+    assert not (smoke_run.output_dir / "smoke_failures.jsonl").exists()
 
 
 def test_matrix_writes_flat_csv_summary(smoke_run):
@@ -146,6 +161,132 @@ def test_rerun_is_deterministic(tmp_path):
         assert ep_a.transcript == ep_b.transcript
         assert ep_a.judge.score == ep_b.judge.score
         assert ep_a.totals == ep_b.totals
+
+
+def test_failing_episode_is_isolated_and_recorded(tmp_path, monkeypatch):
+    monkeypatch.setitem(MODEL_REGISTRY, "failing", FailingModel)
+    data = smoke_dict()
+    data["tasks"] = [{"name": "toy"}]
+    data["seeds"] = [0]
+    data["models"] = [
+        {"provider": "mock", "model": "mock-agent", "temperature": 0.0, "label": "ok-agent"},
+        {"provider": "failing", "model": "doomed", "temperature": 0.0, "label": "doomed-agent"},
+    ]
+    cfg = load_config(write_yaml(tmp_path, data))
+    efforts = data["user_sim"]["effort_levels"]
+
+    # A stale sidecar from a previous invocation must not survive into this
+    # run's report: afterwards its content is exactly this run's failures.
+    sidecar = tmp_path / "smoke_failures.jsonl"
+    sidecar.write_text("stale from a previous run\n")
+
+    results = run_matrix(cfg, output_dir=tmp_path)
+
+    # Every doomed cell failed, every healthy cell still ran and was recorded.
+    assert {ep.model for ep in results} == {"ok-agent"}
+    assert len(results) == len(efforts)
+    lines = (tmp_path / "smoke.jsonl").read_text().splitlines()
+    assert {EpisodeResult.model_validate_json(ln).episode_id for ln in lines} == {
+        ep.episode_id for ep in results
+    }
+    with (tmp_path / "smoke.csv").open() as f:
+        assert {row["model"] for row in csv.DictReader(f)} == {"ok-agent"}
+
+    failures = [EpisodeFailure.model_validate_json(ln) for ln in sidecar.read_text().splitlines()]
+    assert {f.episode_id for f in failures} == {
+        f"toy__doomed-agent__{effort}__s0" for effort in efforts
+    }
+    assert all(f.error_type == "RuntimeError" for f in failures)
+    assert all("scripted provider failure" in f.error for f in failures)
+
+
+def test_cli_exit_code_reflects_failures(tmp_path, monkeypatch):
+    monkeypatch.setitem(MODEL_REGISTRY, "failing", FailingModel)
+    data = smoke_dict()
+    data["tasks"] = [{"name": "toy"}]
+    data["seeds"] = [0]
+    data["user_sim"]["effort_levels"] = ["passive"]
+
+    ok_dir = tmp_path / "ok"
+    ok_dir.mkdir()
+    data["output_dir"] = str(ok_dir)
+    assert runner_main(["--config", str(write_yaml(ok_dir, data))]) is None
+
+    doomed_dir = tmp_path / "doomed"
+    doomed_dir.mkdir()
+    data["output_dir"] = str(doomed_dir)
+    data["models"] = [
+        {"provider": "failing", "model": "doomed", "temperature": 0.0, "label": "doomed-agent"}
+    ]
+    with pytest.raises(SystemExit) as excinfo:
+        runner_main(["--config", str(write_yaml(doomed_dir, data))])
+    assert excinfo.value.code == 1
+
+
+def test_resume_skips_completed_and_appends_missing(tmp_path):
+    data = smoke_dict()
+    data["tasks"] = [{"name": "toy"}]
+    cfg = load_config(write_yaml(tmp_path, data))
+    full = run_matrix(cfg, output_dir=tmp_path)
+    jsonl = tmp_path / "smoke.jsonl"
+    lines = jsonl.read_text().splitlines()
+
+    # Simulate a crash after two episodes — and tamper a survivor's free-text
+    # field, because the mock matrix is deterministic: only a genuine skip
+    # (not a byte-identical re-run) can preserve the marker.
+    kept = [json.loads(lines[0]), json.loads(lines[1])]
+    kept[0]["judge"]["rationale"] = "TAMPER_MARKER_resume"
+    jsonl.write_text("".join(json.dumps(rec) + "\n" for rec in kept))
+
+    resumed = run_matrix(cfg, output_dir=tmp_path, resume=True)
+
+    assert {ep.episode_id for ep in resumed} == {ep.episode_id for ep in full}
+    final_lines = jsonl.read_text().splitlines()
+    assert len(final_lines) == len(full)
+    assert "TAMPER_MARKER_resume" in final_lines[0]
+    with (tmp_path / "smoke.csv").open() as f:
+        assert len(list(csv.DictReader(f))) == len(full)
+
+    # Without the flag the same invocation truncates and reruns from scratch.
+    rerun = run_matrix(cfg, output_dir=tmp_path)
+    assert len(rerun) == len(full)
+    assert "TAMPER_MARKER_resume" not in jsonl.read_text()
+
+
+def _partial_run(base: Path) -> tuple[dict, Path, Path]:
+    """A one-episode results file to resume against, plus its config data/dir."""
+    base.mkdir()
+    data = smoke_dict()
+    data["tasks"] = [{"name": "toy"}]
+    data["seeds"] = [0]
+    data["user_sim"]["effort_levels"] = ["passive", "moderate"]
+    run_matrix(load_config(write_yaml(base, data)), output_dir=base)
+    jsonl = base / "smoke.jsonl"
+    jsonl.write_text(jsonl.read_text().splitlines()[0] + "\n")
+    return data, base, jsonl
+
+
+def test_resume_rejects_foreign_or_corrupt_results(tmp_path):
+    # A different experiment identity: results under another config_hash are a
+    # different experiment, and appending to them would silently mix the two.
+    data, out, _ = _partial_run(tmp_path / "a")
+    data["max_turns"] += 1
+    with pytest.raises(ValueError, match="config_hash"):
+        run_matrix(load_config(write_yaml(out, data)), output_dir=out, resume=True)
+
+    # Same for the prompt fingerprint: prompts are instrument identity.
+    data, out, jsonl = _partial_run(tmp_path / "b")
+    record = json.loads(jsonl.read_text())
+    record["prompts_hash"] = "0" * 12
+    jsonl.write_text(json.dumps(record) + "\n")
+    with pytest.raises(ValueError, match="prompts_hash"):
+        run_matrix(load_config(write_yaml(out, data)), output_dir=out, resume=True)
+
+    # A half-written line is an instrument problem to triage, never to skip.
+    data, out, jsonl = _partial_run(tmp_path / "c")
+    jsonl.write_text(jsonl.read_text() + "{not json\n")
+    with pytest.raises(ValueError):
+        run_matrix(load_config(write_yaml(out, data)), output_dir=out, resume=True)
 
 
 def test_user_sim_stop_signal_ends_episode_early():

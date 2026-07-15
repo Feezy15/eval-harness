@@ -115,15 +115,17 @@ Repo skeleton, config loading, interfaces defined, a **mock model** so the loop 
   and `judge_validation` as a pre-run CLI gate. 137 tests green; decisions 13–22 in
   `docs/architecture.md`.
 
-### 🔶 M2 — The extension (cost/latency-vs-utility) — in progress
+### ✅ M2 — The extension (cost/latency-vs-utility)
 Add token/cost/latency logging and render **utility-per-dollar** and **utility-per-second** curves.
 - **DoD:** a cost-vs-utility plot (not in the paper) plus a short written takeaway.
-- **Status (2026-07-15): analysis chunk done** — the two-panel agent-cost/latency-vs-utility
-  frontier (`plot_cost_latency_frontier`, `--frontier-out`) plus per-cell utility-per-dollar /
+- **Status (2026-07-15): DoD met** — the two-panel agent-cost/latency-vs-utility frontier
+  (`plot_cost_latency_frontier`, `--frontier-out`) plus per-cell utility-per-dollar /
   utility-per-second in the CLI table, computed agent-only (decision 23). Takeaway on the M1 data
   is in the README's "Cost of Effort" section: gpt-5.4-mini's passive→moderate gain is free
   deployer-side while haiku pays 2.4× cost / 2.3× latency, and no segment rises past moderate.
-  Remaining for M2: per-episode exception isolation / resume-from-JSONL.
+  Robustness landed with it: a failing episode is isolated to a `{run}_failures.jsonl` sidecar
+  instead of aborting the matrix, and `--resume` re-runs only the missing cells of an existing
+  results file under a verified experiment identity.
 
 ### ⬜ M3 — Reproducibility & engineering polish
 Dockerfile, pinned deps, fixed seeds, config-driven matrix, unit tests + GitHub Actions CI (mock model, no

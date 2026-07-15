@@ -87,6 +87,19 @@ class TurnRecord(BaseModel):
     usage: Usage
 
 
+class EpisodeFailure(BaseModel):
+    """One failed episode: enough to identify the cell and triage, never scored."""
+
+    episode_id: str
+    task: str
+    model: str  # config label, same identity as EpisodeResult.model
+    effort: EffortLevel
+    seed: int
+    error_type: str  # exception class name
+    error: str  # str(exc)
+    started_at: datetime
+
+
 class EpisodeResult(BaseModel):
     """One episode = one cell of the (task x model x effort x seed) matrix.
 

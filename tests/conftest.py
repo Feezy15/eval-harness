@@ -118,6 +118,19 @@ class FakeProviderModel(AgentModel):
         )
 
 
+class FailingModel(AgentModel):
+    """Provider stand-in whose calls always blow up: exercises per-episode
+    exception isolation without depending on any real provider failure mode."""
+
+    def __init__(self, model: str, seed: int, temperature: float, max_tokens: int | None = None):
+        self.model = model
+        self.temperature = temperature
+        self.name = f"failing:{model}"
+
+    def next_turn(self, conversation: Sequence[Message]) -> ModelResponse:
+        raise RuntimeError("scripted provider failure")
+
+
 @dataclass(frozen=True)
 class SmokeRun:
     """A single, already-executed matrix run and where it wrote its output."""
