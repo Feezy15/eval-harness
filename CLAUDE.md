@@ -126,5 +126,8 @@ triage — decision 22), and `experiment.yaml`/`pilot.yaml` behind spend-guardra
 freshness is procedural: verify the pages cited in `models/pricing.py` and bump
 `PRICING_VERSION` before any paid run. 137 tests green.
 
-**Next:** M2 — cost/latency-vs-utility curves (`utility-per-dollar`, `utility-per-second`) and a
-second task. See `docs/PROJECT.md` for M0-M4.
+**M2 in progress on `m2-extension`.** Analysis chunk done (2026-07-15): agent-only
+cost/latency-vs-utility frontier (`plot_cost_latency_frontier`, `--frontier-out`) + per-cell
+utility-per-dollar / utility-per-second in the CLI output — decision 23; README "Cost of Effort"
+has the figure and takeaway. The analysis CLI now writes two PNGs per run. Remaining for M2: per-episode
+exception isolation / resume-from-JSONL. See `docs/PROJECT.md` for M0-M4.

@@ -577,6 +577,36 @@ through the judge's real call path; any per-criterion disagreement fails the gat
   unstudied, parked in PROJECT.md §6); no stability/repeat check (would need cache-off repeat
   calls; deferred).
 
+### 23. Cost/latency analysis is agent-only spend; efficiency ratios are table output, not figures
+
+M2's frontier analysis (`agent_usage`, `cost_latency_by_effort`, `plot_cost_latency_frontier`,
+`--frontier-out`) reads the same results JSONL and plots each (task, model, effort) cell at its
+mean agent cost/latency against mean utility, connecting effort levels in treatment order.
+
+- **Why agent-only, not episode totals:** the research question is what a *deployer* pays per
+  effort level. `EpisodeResult.totals` sums agent + user-sim + judge calls, but the sim stands in
+  for a human whose real cost is effort (not API dollars) and the judge is measurement overhead —
+  pooling them would let eval-instrument spend distort the deployment-cost axis. `agent_usage`
+  re-sums per-turn `Usage` where `actor == "agent"`; episode totals stay in the CLI table as
+  context.
+- **Why ratio-of-means for utility-per-dollar/-second:** with a handful of episodes per cell, one
+  cheap low-scoring episode dominates an averaged per-episode ratio; `mean_score / mean_cost` is
+  the stabler estimator at this N.
+- **Why ratios stay in the CLI table:** the plotted deliverable is the frontier; per-cell
+  utility-per-dollar/-second and any marginal deltas are printed context.
+- **Figure conventions inherited from decision 19:** JSONL not CSV, faint per-seed replicate
+  dots, fail-loud four-slot palette, effort as ordered categorical. New here: per-effort-level
+  label offsets (a plateau puts two effort cells on nearly the same frontier point, and a shared
+  offset would overprint their labels), and one task title/ylabel per panel pair.
+- **Zero-spend cells:** mock runs produce ~zero agent cost/latency; ratios go NaN via the same
+  `replace(0, nan)` convention as the manipulation check — surfaced, not hidden, and the CLI
+  prints them without crashing (smoke stays keyless and green).
+- **Gaps:** decision 20's repair-budget accounting gap (usage lost when the judge repair budget
+  exhausts) is moot for these agent-only metrics but still open for judge-cost reporting; the
+  frontier assumes one run per file, like the utility figure; latency is provider-reported call
+  time summed per episode, so it tracks API-side generation time, not user-perceived wall clock
+  with network overhead.
+
 ## Testing strategy
 
 Tests were written red-first (each test file failed before its implementation existed):
