@@ -36,6 +36,14 @@ from collab_eval.user_sim import UserSimulator
 FINAL_ARTIFACT_REQUEST = load_prompt("final_artifact_request")
 
 
+def make_episode_id(task_name: str, model_label: str, effort: str, seed: int) -> str:
+    """Single authority on episode identity. `run_episode` stamps it into the
+    persisted record and `run_matrix`'s resume path matches against it to skip
+    completed cells — deriving the id in two places would let a format change
+    in one silently break the other's matching."""
+    return f"{task_name}__{model_label}__{effort}__s{seed}"
+
+
 def _lookup[T](registry: Mapping[str, T], key: str, kind: str) -> T:
     """Registry lookup with an error that says what *is* available."""
     try:
@@ -115,7 +123,7 @@ def run_episode(
     turns: list[TurnRecord] = []
 
     with tracer.start_as_current_span("episode") as episode_span:
-        episode_id = f"{task.name}__{label}__{user_sim.effort}__s{seed}"
+        episode_id = make_episode_id(task.name, label, user_sim.effort, seed)
         episode_span.set_attribute(telemetry.ATTR_EPISODE_ID, episode_id)
         episode_span.set_attribute(telemetry.ATTR_TASK, task.name)
         episode_span.set_attribute(telemetry.ATTR_MODEL, label)
@@ -367,6 +375,7 @@ def run_matrix(
         results, done_ids = _load_resume_state(jsonl_path, config_hash)
     else:
         results, done_ids = [], set()
+    n_resumed = len(results)
 
     try:
         with tracer.start_as_current_span("run") as run_span:
@@ -386,7 +395,7 @@ def run_matrix(
                                 label = (
                                     model_cfg.label if model_cfg.label is not None else agent.name
                                 )
-                                episode_id = f"{task.name}__{label}__{effort}__s{seed}"
+                                episode_id = make_episode_id(task.name, label, effort, seed)
                                 if episode_id in done_ids:
                                     continue
 
@@ -442,8 +451,12 @@ def run_matrix(
                                 results.append(episode)
 
             # Set once the matrix is actually done, so this reflects what ran
-            # rather than a size computed in advance.
-            run_span.set_attribute(telemetry.ATTR_N_EPISODES, len(results))
+            # rather than a size computed in advance. Episodes loaded from a
+            # resumed results file are counted separately: the trace is the
+            # record of *this* invocation, and a resumed run never made those
+            # calls.
+            run_span.set_attribute(telemetry.ATTR_N_EPISODES, len(results) - n_resumed)
+            run_span.set_attribute(telemetry.ATTR_N_EPISODES_RESUMED, n_resumed)
     finally:
         if provider is not None:
             provider.shutdown()

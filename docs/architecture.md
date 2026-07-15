@@ -626,11 +626,14 @@ message), logged to stderr, and the matrix moves on; the CLI exits nonzero if an
   line is fatal rather than skipped. Without the flag a rerun truncates as before: the cache
   replays completed calls with their recorded cost/latency, so an overwritten run is exactly
   recomputable and overwrite stays the cheap default.
-- **Gaps:** episode identity is derived independently in `run_episode` and the resume skip
-  check, a drift risk between the two; the run span's episode count includes loaded episodes,
-  so telemetry doesn't distinguish ran-now from resumed; a failed episode's partial spend
-  (calls made before the exception) is visible only in the cache and spans, not the JSONL —
-  the same accounting shape as decision 20's repair-exhaustion gap.
+- **Episode identity and resume telemetry:** `make_episode_id` is the single authority on
+  episode identity — `run_episode` stamps it into the record and the resume skip check matches
+  against it, so the two can't drift. The run span reports `n_episodes` (executed this
+  invocation) and `n_episodes_resumed` (loaded from the existing file) separately, so a
+  resumed run's trace describes what actually ran.
+- **Gaps:** a failed episode's partial spend (calls made before the exception) is visible only
+  in the cache and spans, not the JSONL — the same accounting shape as decision 20's
+  repair-exhaustion gap.
 
 ## Testing strategy
 
