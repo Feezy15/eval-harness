@@ -3,8 +3,8 @@
 *Python 3.12 · MIT License*
 
 A small, reproducible harness that measures **how an LLM agent's usefulness scales with user involvement**
-across multi-turn tasks. It reproduces the core finding of *Completion ≠ Collaboration* (Wu et al., 2025) and
-extends it with a **cost/latency-vs-utility** analysis the paper doesn't cover.
+across multi-turn tasks. It reproduces the *direction* of the core finding of *Completion ≠ Collaboration*
+(Wu et al., 2025) on one task, and extends it with a **cost/latency-vs-utility** analysis the paper doesn't cover.
 
 ## Motivation
 
@@ -28,7 +28,20 @@ level and plots the curves across models. Concept from
 - Produces **utility-vs-effort** and **cost/latency-vs-utility** curves across models.
 - Runs end-to-end on a **mock model** with zero API cost for development and CI.
 
+
+The rigorous frameworks for evaluating human-agent collaboration are Stanford SALT's
+[**Co-Gym**](https://arxiv.org/abs/2412.15701) (Shao et al., 2024) and its successor [**CollabSkill**](https://arxiv.org/abs/2606.09833)
+(Shao et al., 2026), which moves to real workers on real occupational tasks and uses a Bayesian skill-rating
+system to disentangle human vs. agent contributions. Both measure collaboration **quality/skill**.
+
+This harness is a lightweight, single-machine probe of a different axis those frameworks don't price: the
+**cost and latency** of collaboration — the marginal utility of user involvement per dollar and per second. Treat this repo as a prototype of that measurement idea.
+
 ## First results (M1)
+
+**TL;DR** — On `trip_planning`, utility rises sharply from a passive to a moderately engaged user, then plateaus;
+a mid-size model with a moderately engaged user dominates on utility, cost, *and* latency at once, and beyond
+moderate involvement extra user effort buys no additional utility at any price.
 
 24 episodes: `trip_planning` × {`claude-haiku-4-5`, `gpt-5.4-mini`} × {passive, moderate,
 active_steering} × 4 seeded scenarios, with `gpt-5.4-mini` as the simulated user and a
@@ -87,7 +100,7 @@ context, not a ranking.
 ## Quickstart
 
 ```bash
-git clone <repo-url> && cd eval-harness
+git clone https://github.com/Feezy15/eval-harness && cd eval-harness
 uv sync   # installs the pinned Python 3.12 + exact locked deps (get uv: https://docs.astral.sh/uv/)
 
 # No-cost smoke run on the mock model
@@ -139,15 +152,19 @@ and [`docs/PROJECT.md`](docs/PROJECT.md) for the research spec and milestones.
 
 Small sample sizes (4 scenarios per cell; seeds select scenarios, so replicate spread mixes scenario
 difficulty with sampling variance), LLM-as-judge bias (one judge model, sharing a family with one
-agent — mitigated but not eliminated by the validated checklist), the realism of the simulated user
-(one sim model; scenarios lack some real-world context like a home city, which occasionally makes
-the sim deflect awkwardly), and prompt sensitivity all affect the results. Recorded dollar costs
-are list-price upper bounds as of each record's `pricing_version` (the table is hand-verified
-before paid runs, not fetched live). Treat the curves as directional, not definitive.
+agent — mitigated but not eliminated by the validated checklist), and prompt sensitivity all affect
+the results. The **simulated user is a known-imperfect proxy**: LLM user simulators tend to be overly
+cooperative and stylistically uniform (highlighted by CollabSkill, Shao et al., 2026), so
+the diminishing-returns shape may partly reflect the simulator rather than real users. (The scenarios also lack some real-world context like a
+home city, which occasionally makes the sim deflect awkwardly.) Recorded dollar costs are list-price
+upper bounds as of each record's `pricing_version` (the table is hand-verified before paid runs, not
+fetched live). Treat the curves as directional, not definitive.
 
 ## References
 
 - Wu et al., *Completion ≠ Collaboration: Scaling Collaborative Effort with Agents*, arXiv:2510.25744 (2025).
+- Shao, Samuel, Jiang, Yang, Yang, *Collaborative Gym: A Framework for Enabling and Evaluating Human-Agent Collaboration*, arXiv:2412.15701 (2024).
+- Shao et al., *CollabSkill: Evaluating Human-Agent Collaboration on Real-World Tasks*, arXiv:2606.09833 (2026).
 - Lee, Liang, Yang, *CoAuthor* (CHI 2022).
 - Lee et al., *Evaluating Human-Language Model Interaction (HALIE)* (TMLR 2023).
 
